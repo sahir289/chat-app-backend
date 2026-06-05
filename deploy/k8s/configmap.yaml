@@ -1,0 +1,18 @@
+# A ConfigMap holds NON-secret configuration as key/value pairs, decoupled from
+# the image. Change config here and restart pods — no rebuild needed. The same
+# image can run in dev/staging/prod, differing only by the ConfigMap + Secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chatbot-config
+  namespace: chatbot
+data:
+  NODE_ENV: "production"
+  PORT: "4000"
+  # Behind an AWS load balancer, trust the X-Forwarded-* headers (see server.ts).
+  TRUST_PROXY: "true"
+  LOG_LEVEL: "info"
+  # Public URLs and CORS origins are environment-specific, not secret.
+  APP_URL: "https://app.yourplatform.com"
+  CORS_ORIGINS: "https://app.yourplatform.com,https://www.yourplatform.com"
+  WIDGET_BACKEND_URL: "https://api.yourplatform.com"

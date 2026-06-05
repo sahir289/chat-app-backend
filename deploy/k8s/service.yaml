@@ -1,0 +1,20 @@
+# A Service gives your ever-changing set of pods ONE stable virtual IP + DNS name
+# ("chatbot-backend.chatbot.svc.cluster.local") and load-balances across the
+# healthy (ready) pods. Pods come and go; the Service address never changes.
+apiVersion: v1
+kind: Service
+metadata:
+  name: chatbot-backend
+  namespace: chatbot
+  labels:
+    app: chatbot-backend
+spec:
+  # ClusterIP = internal-only. The public entrypoint is the Ingress/ALB, which
+  # forwards to this Service. Keeps pods off the public internet directly.
+  type: ClusterIP
+  selector:
+    app: chatbot-backend   # routes to every pod carrying this label
+  ports:
+    - name: http
+      port: 80           # other in-cluster clients hit the Service on :80
+      targetPort: 4000   # which maps to the container's :4000

@@ -1,0 +1,100 @@
+# A Deployment is the desired-state controller for your app. You declare "I want
+# N identical pods running this image"; Kubernetes continuously makes reality
+# match — restarting crashed pods, replacing dead nodes, and rolling out updates.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chatbot-backend
+  namespace: chatbot
+  labels:
+    app: chatbot-backend
+spec:
+  # Start with 3 replicas across AZs for high availability. The HPA will scale
+  # this up/down automatically based on load (see hpa.yaml).
+  replicas: 3
+
+  # How the Deployment finds the pods it owns (must match template labels below).
+  selector:
+    matchLabels:
+      app: chatbot-backend
+
+  # Zero-downtime rolling update: add new pods before removing old ones.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # up to 1 extra pod above replicas during rollout
+      maxUnavailable: 0    # never drop below desired count → no downtime
+
+  template:
+    metadata:
+      labels:
+        app: chatbot-backend   # pods get this label; Service/HPA select on it
+    spec:
+      # Give Node time to flush connections on SIGTERM (matches graceful shutdown).
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: chatbot-backend
+          # CI (Jenkins) overwrites this tag per commit via "kubectl set image".
+          image: 123456789012.dkr.ecr.ap-south-1.amazonaws.com/chatbot-backend:latest
+          ports:
+            - containerPort: 4000
+
+          # Inject ALL ConfigMap keys and ALL Secret keys as environment variables
+          # — exactly how your code reads process.env.* today. No code changes.
+          envFrom:
+            - configMapRef:
+                name: chatbot-config
+            - secretRef:
+                name: chatbot-secrets
+
+          # PROBES — how Kubernetes knows the app's true state, using your /health.
+          #
+          # startupProbe: protects slow boots (Prisma migrate + Redis/DB checks).
+          # While it's still failing, liveness/readiness are paused.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            failureThreshold: 30
+            periodSeconds: 5      # allows up to ~150s to become ready
+          # livenessProbe: if this fails repeatedly, the pod is restarted (deadlock).
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            periodSeconds: 15
+            failureThreshold: 3
+          # readinessProbe: if this fails, the pod is removed from the Service's
+          # load-balancing pool but NOT killed — so no traffic hits a pod that
+          # temporarily lost Redis/DB. This is what prevents broken responses.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            periodSeconds: 10
+            failureThreshold: 3
+
+          # Resource requests/limits: requests drive scheduling + HPA math; limits
+          # cap a noisy pod so it can't starve neighbors. Tune to real usage.
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "384Mi"
+            limits:
+              cpu: "1000m"
+              memory: "768Mi"
+
+          # Defense in depth: no new privileges, non-root, read-only root FS.
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # App writes logs/temp; mount a writable scratch dir since root FS is RO.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

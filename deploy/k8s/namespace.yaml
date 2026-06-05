@@ -1,0 +1,7 @@
+# A Namespace is a virtual cluster-inside-a-cluster. It isolates this app's
+# resources (pods, services, secrets) from everything else and lets you apply
+# quotas/RBAC per team or per app. Create it first; everything else lives in it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatbot

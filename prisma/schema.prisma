@@ -1,0 +1,1741 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id                              String                  @id @default(cuid())
+  name                            String
+  slug                            String?                 @unique
+  email                           String?
+  phone                           String?
+  logo                            String?
+  createdBySuperAdminId           String?
+  isActive                        Boolean                 @default(true)
+  isSuspended                     Boolean                 @default(false)
+  suspensionReason                String?
+  isPro                           Boolean                 @default(false)
+  hasUsedFreeExport               Boolean                 @default(false)
+  createdAt                       DateTime                @default(now())
+  updatedAt                       DateTime                @updatedAt
+  deletedAt                       DateTime?
+  /// OpenAI chat model IDs allowed for this company (set by Super Admin only). Empty until assigned.
+  allowedOpenAiChatModels         String[]                @default([])
+  aiCreditsMonthlyBase            Int                     @default(0)
+  aiCreditsUsed                   Int                     @default(0)
+  aiCreditsResetAt                DateTime
+  aiStatus                        AiStatus                @default(ACTIVE)
+  aiCreditsRemaining              Int                     @default(0)
+  aiTokensPerCredit               Int                     @default(500)
+  aiPromptTokensUsed              Int                     @default(0)
+  aiCompletionTokensUsed          Int                     @default(0)
+  aiTotalTokensUsed               Int                     @default(0)
+  aiMonthlyPromptTokensUsed       Int                     @default(0)
+  aiMonthlyCompletionTokensUsed   Int                     @default(0)
+  aiMonthlyTokensUsed             Int                     @default(0)
+  aiCreditsMonthlyManualOverride  Boolean                 @default(false)
+  aiTokensPerCreditManualOverride Boolean                 @default(false)
+  aiCreditsAddonRequests          AiCreditsAddonRequest[]
+  aiTokenUsages                   AiTokenUsage[]
+  aiTopups                        AiTopup[]
+  apiKeys                         ApiKey[]
+  assignmentRules                 AssignmentRule[]
+  auditLogs                       AuditLog[]
+  automationWorkflows             AutomationWorkflow[]
+  cannedResponses                 CannedResponse[]
+  chats                           Chat[]
+  chatbotFlows                    ChatbotFlow[]
+  createdBySuperAdmin             User?                   @relation("SuperAdminCreatedCompanies", fields: [createdBySuperAdminId], references: [id])
+  crmFieldMappings                CrmFieldMapping[]
+  crmIntegrations                 CrmIntegration[]
+  crmSyncLogs                     CrmSyncLog[]
+  customFields                    CustomField[]
+  departments                     Department[]
+  emailNotifications              EmailNotification[]
+  faqs                            FAQ[]
+  featureFlags                    FeatureFlag[]
+  integrations                    Integration[]
+  knowledgeChunks                 KnowledgeChunk[]
+  knowledgeSources                KnowledgeSource[]
+  leads                           Lead[]
+  leadCrmLinks                    LeadCrmLink[]
+  offlineForms                    OfflineForm[]
+  proactiveTriggers               ProactiveTrigger[]
+  properties                      Property[]
+  quickReplies                    QuickReply[]
+  slaRules                        SlaRule[]
+  subscriptions                   Subscription[]
+  tags                            Tag[]
+  upgradeRequests                 UpgradeRequest[]
+  users                           User[]
+  visitors                        Visitor[]
+  visitorEvents                   VisitorEvent[]
+  visitorSegments                 VisitorSegment[]
+  webhooks                        Webhook[]
+  /// CRM lead sync UI prefs, e.g. `{ "primaryLeadSyncProvider": "HUBSPOT" }` when multiple CRMs are connected.
+  crmLeadSyncPreferences          Json?
+
+  @@index([deletedAt])
+  @@index([isActive])
+  @@index([isSuspended])
+  @@index([createdBySuperAdminId])
+  @@index([isPro])
+  @@index([aiCreditsResetAt])
+  @@index([aiStatus])
+}
+
+model AiTokenUsage {
+  id                          String   @id @default(cuid())
+  companyId                   String
+  chatId                      String?
+  promptTokens                Int      @default(0)
+  completionTokens            Int      @default(0)
+  totalTokens                 Int      @default(0)
+  creditsConsumed             Int      @default(0)
+  monthlyCreditsConsumed      Int      @default(0)
+  topupCreditsConsumed        Int      @default(0)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  /// Fractional credits (3 decimals) stored as integers (e.g. 0.35 => 350).
+  creditsConsumedMilli        Int      @default(0)
+  monthlyCreditsConsumedMilli Int      @default(0)
+  topupCreditsConsumedMilli   Int      @default(0)
+  chat                        Chat?    @relation(fields: [chatId], references: [id])
+  company                     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([chatId])
+  @@index([createdAt])
+  @@index([companyId, createdAt])
+}
+
+model AiTopup {
+  id                    String   @id @default(cuid())
+  companyId             String
+  creditsAdded          Int
+  creditsRemaining      Int
+  amount                Float
+  createdAt             DateTime @default(now())
+  /// Fractional credits (3 decimals) stored as integers (e.g. 1 credit => 1000).
+  creditsAddedMilli     Int      @default(0)
+  creditsRemainingMilli Int      @default(0)
+  company               Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([companyId, creditsRemaining])
+}
+
+model User {
+  id                              String                  @id @default(cuid())
+  companyId                       String?
+  email                           String                  @unique
+  name                            String?
+  password                        String?
+  role                            Role
+  isOwner                         Boolean                 @default(false)
+  isActive                        Boolean                 @default(false)
+  emailVerified                   Boolean                 @default(false)
+  avatarUrl                       String?
+  deletedAt                       DateTime?
+  inviteToken                     String?
+  inviteExpires                   DateTime?
+  emailVerificationToken          String?
+  emailVerificationExpires        DateTime?
+  passwordResetToken              String?
+  passwordResetExpires            DateTime?
+  lastSeen                        DateTime?               @default(now())
+  timezone                        String?                 @default("UTC")
+  twoFactorEnabled                Boolean                 @default(false)
+  twoFactorSecret                 String?
+  twoFactorBackupCodes            String[]                @default([])
+  isSuperAdmin                    Boolean                 @default(false)
+  createdAt                       DateTime                @default(now())
+  updatedAt                       DateTime                @updatedAt
+  agentAvailability               AgentAvailability?
+  agentModuleAccess               AgentModuleAccess?
+  agentPropertyAccess             AgentPropertyAccess[]
+  processedAiCreditsAddonRequests AiCreditsAddonRequest[] @relation("ProcessedAiCreditsAddonRequests")
+  apiKeys                         ApiKey[]
+  attachments                     Attachment[]
+  auditLogs                       AuditLog[]
+  cannedResponses                 CannedResponse[]
+  chats                           Chat[]                  @relation("AgentChats")
+  chatNotes                       ChatNote[]
+  chatRatings                     ChatRating[]
+  chatTags                        ChatTag[]
+  chatTranscripts                 ChatTranscript[]
+  transfersFrom                   ChatTransfer[]          @relation("TransfersFrom")
+  transfersTo                     ChatTransfer[]          @relation("TransfersTo")
+  createdCompanies                Company[]               @relation("SuperAdminCreatedCompanies")
+  departments                     DepartmentMember[]
+  emailNotifications              EmailNotification[]
+  messages                        Message[]               @relation("AgentMessages")
+  messageReactions                MessageReaction[]
+  readReceipts                    MessageReadReceipt[]
+  offlineForms                    OfflineForm[]
+  refreshTokens                   RefreshToken[]
+  subscriptionChanges             SubscriptionChange[]
+  processedUpgradeRequests        UpgradeRequest[]        @relation("ProcessedUpgradeRequests")
+  company                         Company?                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  settings                        UserSettings?
+
+  @@index([companyId])
+  @@index([role])
+  @@index([isActive])
+  @@index([isSuperAdmin])
+  @@index([deletedAt])
+}
+
+model UserSettings {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  notificationsEnabled Boolean   @default(true)
+  chatSound            ChatSound @default(PING)
+  theme                Theme     @default(LIGHT)
+  browserAlerts        Boolean   @default(true)
+  emailNotifications   Boolean   @default(true)
+  desktopNotifications Boolean   @default(true)
+  language             String    @default("en")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model Property {
+  id                          String                @id @default(cuid())
+  companyId                   String
+  name                        String
+  domain                      String?
+  widgetKey                   String                @unique
+  chatbotName                 String?
+  chatbotLogo                 String?
+  launcherButtonColor         String?
+  primaryColor                String?
+  backgroundColor             String?
+  textColor                   String?
+  leftMessageBackgroundColor  String?
+  leftMessageTextColor        String?
+  rightMessageBackgroundColor String?
+  rightMessageTextColor       String?
+  welcomeMessage              String?
+  position                    String?               @default("right")
+  showOnMobile                Boolean               @default(true)
+  showOnDesktop               Boolean               @default(true)
+  aiEnabled                   Boolean               @default(true)
+  offlineFormEnabled          Boolean               @default(true)
+  proactiveChatEnabled        Boolean               @default(false)
+  removeBranding              Boolean               @default(false)
+  createdAt                   DateTime              @default(now())
+  deletedAt                   DateTime?
+  /// Selected chat model for this widget (must be in company.allowedOpenAiChatModels when set)
+  openAiChatModelId           String?
+  /// Optional, tenant-defined system prompt injected into AI replies for this widget/property.
+  customSystemPrompt          String?
+  agentPropertyAccess         AgentPropertyAccess[]
+  assignmentRules             AssignmentRule[]
+  businessHours               BusinessHours?
+  chats                       Chat[]
+  chatbotFlows                ChatbotFlow[]
+  faqs                        FAQ[]
+  knowledgeChunks             KnowledgeChunk[]
+  knowledgeSources            KnowledgeSource[]
+  leads                       Lead[]
+  offlineForms                OfflineForm[]
+  proactiveTriggers           ProactiveTrigger[]
+  company                     Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  quickReplies                QuickReply[]
+  visitorEvents               VisitorEvent[]
+
+  @@unique([companyId, domain])
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model Visitor {
+  id           String                 @id @default(cuid())
+  companyId    String
+  sessionId    String
+  name         String?
+  email        String?
+  phone        String?
+  ipAddress    String?
+  userAgent    String?
+  device       String?
+  browser      String?
+  country      String?
+  city         String?
+  timezone     String?
+  firstSeen    DateTime               @default(now())
+  lastSeen     DateTime?
+  totalVisits  Int                    @default(1)
+  externalId   String?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  deletedAt    DateTime?
+  /// Browser/widget visitor token (same value as sessionId; mirrors Chat.visitorToken)
+  visitorToken String
+  chats        Chat[]
+  leads        Lead[]
+  messages     Message[]              @relation("VisitorMessages")
+  company      Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  events       VisitorEvent[]
+  segments     VisitorSegmentMember[]
+  tags         VisitorTag[]
+
+  @@unique([companyId, visitorToken])
+  @@index([companyId])
+  @@index([sessionId])
+  @@index([visitorToken])
+  @@index([email])
+  @@index([deletedAt])
+}
+
+model VisitorTag {
+  id        String   @id @default(cuid())
+  visitorId String
+  tag       String
+  createdAt DateTime @default(now())
+  visitor   Visitor  @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+
+  @@unique([visitorId, tag])
+  @@index([visitorId])
+  @@index([tag])
+}
+
+model Chat {
+  id             String               @id @default(cuid())
+  companyId      String
+  propertyId     String
+  sessionId      String
+  visitorId      String?
+  agentId        String?
+  departmentId   String?
+  status         ChatStatus           @default(ACTIVE)
+  priority       ChatPriority         @default(NORMAL)
+  aiEnabled      Boolean              @default(true)
+  subject        String?
+  source         ChatSource?
+  firstMessageAt DateTime?
+  lastMessageAt  DateTime?
+  assignedAt     DateTime?
+  closedAt       DateTime?
+  unreadCount    Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  deletedAt      DateTime?
+  /// Browser/widget visitor token (widget uses the same value as sessionId)
+  visitorToken   String
+  aiTokenUsages  AiTokenUsage[]
+  agent          User?                @relation("AgentChats", fields: [agentId], references: [id])
+  company        Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  department     Department?          @relation(fields: [departmentId], references: [id])
+  property       Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  visitor        Visitor?             @relation(fields: [visitorId], references: [id])
+  notes          ChatNote[]
+  rating         ChatRating?
+  tags           ChatTag[]
+  transcript     ChatTranscript?
+  transfers      ChatTransfer[]
+  customFields   CustomFieldValue[]
+  leads          Lead[]
+  messages       Message[]            @relation("ChatMessages")
+  readReceipts   MessageReadReceipt[]
+  slaMetrics     SlaMetric[]
+  events         VisitorEvent[]
+
+  @@index([propertyId, sessionId])
+  @@index([visitorToken])
+  @@index([propertyId, visitorToken, createdAt])
+  @@index([agentId])
+  @@index([visitorId])
+  @@index([status])
+  @@index([priority])
+  @@index([departmentId])
+  @@index([createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([propertyId, status, createdAt])
+  @@index([agentId, status])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id                  String               @id @default(cuid())
+  chatId              String
+  senderType          SenderType
+  messageType         MessageType          @default(TEXT)
+  visitorId           String?
+  agentId             String?
+  botName             String?
+  text                String?
+  metadata            Json?
+  clientMessageId     String?
+  replyToClientMessageId String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  deletedAt           DateTime?
+  isDeleted           Boolean              @default(false)
+  editedAt            DateTime?
+  attachments         Attachment[]
+  agent               User?                @relation("AgentMessages", fields: [agentId], references: [id])
+  chat                Chat                 @relation("ChatMessages", fields: [chatId], references: [id], onDelete: Cascade)
+  visitor             Visitor?             @relation("VisitorMessages", fields: [visitorId], references: [id])
+  messageButtons      MessageButton[]
+  messageCards        MessageCard[]
+  messageQuickReplies MessageQuickReply[]
+  reactions           MessageReaction[]
+  readReceipts        MessageReadReceipt[]
+
+  @@index([chatId])
+  @@index([visitorId])
+  @@index([agentId])
+  @@index([senderType])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@index([chatId, createdAt])
+  @@unique([chatId, senderType, clientMessageId])
+  @@unique([chatId, senderType, replyToClientMessageId])
+  @@index([deletedAt, createdAt])
+}
+
+model VisitorEvent {
+  id           String   @id @default(cuid())
+  companyId    String
+  propertyId   String
+  chatId       String?
+  sessionId    String
+  visitorId    String?
+  eventType    String
+  url          String?
+  referrer     String?
+  userAgent    String?
+  device       String?
+  browser      String?
+  country      String?
+  city         String?
+  ipAddress    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  /// Browser/widget visitor token (same value as sessionId; mirrors Chat.visitorToken)
+  visitorToken String
+  chat         Chat?    @relation(fields: [chatId], references: [id])
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  visitor      Visitor? @relation(fields: [visitorId], references: [id])
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([visitorId])
+  @@index([sessionId])
+  @@index([visitorToken])
+  @@index([propertyId, visitorToken, createdAt])
+  @@index([chatId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model Lead {
+  id           String             @id @default(cuid())
+  companyId    String
+  chatId       String?
+  propertyId   String
+  visitorId    String?
+  fullName     String
+  email        String
+  phone        String?
+  companyName  String?
+  notes        String?
+  status       LeadStatus         @default(NEW)
+  source       LeadSource         @default(WEBSITE)
+  channel      String             @default("web_widget")
+  externalId   String?
+  syncedAt     DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  crmSyncLogs  CrmSyncLog[]
+  customFields CustomFieldValue[]
+  chat         Chat?              @relation(fields: [chatId], references: [id])
+  company      Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property     Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  visitor      Visitor?           @relation(fields: [visitorId], references: [id])
+  crmLinks     LeadCrmLink[]
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([chatId])
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CrmIntegration {
+  id                     String               @id @default(cuid())
+  companyId              String
+  provider               CrmProvider
+  status                 CrmIntegrationStatus @default(CONNECTED)
+  encryptedAccessToken   String?
+  encryptedRefreshToken  String?
+  tokenExpiresAt         DateTime?
+  encryptedWebhookUrl    String?
+  encryptedWebhookSecret String?
+  settings               Json?
+  lastSyncAt             DateTime?
+  lastError              String?
+  createdById            String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  company                Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  syncLogs               CrmSyncLog[]
+
+  @@unique([companyId, provider])
+  @@index([companyId])
+  @@index([provider])
+  @@index([status])
+}
+
+model CrmFieldMapping {
+  id        String        @id @default(cuid())
+  companyId String
+  provider  CrmProvider
+  source    CrmLeadSource
+  mappings  Json
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  company   Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, provider, source])
+  @@index([companyId])
+  @@index([provider, source])
+}
+
+model CrmSyncLog {
+  id              String          @id @default(cuid())
+  companyId       String
+  integrationId   String?
+  leadId          String?
+  chatId          String?
+  provider        CrmProvider
+  action          CrmSyncAction
+  trigger         CrmSyncTrigger
+  status          CrmSyncStatus   @default(PENDING)
+  requestPayload  Json?
+  responsePayload Json?
+  errorMessage    String?
+  retryCount      Int             @default(0)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  company         Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  integration     CrmIntegration? @relation(fields: [integrationId], references: [id])
+  lead            Lead?           @relation(fields: [leadId], references: [id])
+
+  @@index([companyId])
+  @@index([integrationId])
+  @@index([leadId])
+  @@index([chatId])
+  @@index([provider])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model LeadCrmLink {
+  id           String      @id @default(cuid())
+  companyId    String
+  leadId       String
+  provider     CrmProvider
+  crmContactId String?
+  crmDealId    String?
+  lastSyncedAt DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  company      Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lead         Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, leadId, provider])
+  @@index([companyId])
+  @@index([leadId])
+  @@index([provider])
+  @@index([crmContactId])
+}
+
+model KnowledgeSource {
+  id         String           @id @default(cuid())
+  companyId  String
+  propertyId String
+  sourceType SourceType
+  title      String
+  content    String?
+  url        String?
+  filePath   String?
+  fileName   String?
+  fileSize   Int?
+  status     KnowledgeStatus  @default(PENDING)
+  chunkCount Int              @default(0)
+  error      String?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  deletedAt  DateTime?
+  chunks     KnowledgeChunk[]
+  company    Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property   Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([sourceType])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model KnowledgeChunk {
+  id              String                 @id @default(cuid())
+  companyId       String
+  sourceId        String
+  propertyId      String
+  content         String
+  chunkIndex      Int
+  embedding       Unsupported("vector")?
+  embeddingVendor EmbeddingVendor?
+  embeddingModel  String?
+  embeddingDim    Int?
+  metadata        Json?
+  createdAt       DateTime               @default(now())
+  company         Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property        Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  source          KnowledgeSource        @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, chunkIndex])
+  @@index([companyId, embeddingVendor, embeddingModel])
+  @@index([sourceId])
+  @@index([propertyId])
+  @@index([chunkIndex])
+}
+
+model MessageButton {
+  id        String   @id @default(cuid())
+  messageId String
+  label     String
+  value     String
+  type      String   @default("postback")
+  url       String?
+  payload   String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([order])
+}
+
+model MessageCard {
+  id        String              @id @default(cuid())
+  messageId String
+  title     String
+  subtitle  String?
+  imageUrl  String?
+  order     Int                 @default(0)
+  createdAt DateTime            @default(now())
+  message   Message             @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  buttons   MessageCardButton[]
+
+  @@index([messageId])
+  @@index([order])
+}
+
+model MessageCardButton {
+  id      String      @id @default(cuid())
+  cardId  String
+  label   String
+  value   String
+  type    String      @default("postback")
+  url     String?
+  payload String?
+  order   Int         @default(0)
+  card    MessageCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId])
+  @@index([order])
+}
+
+model MessageQuickReply {
+  id        String  @id @default(cuid())
+  messageId String
+  label     String
+  payload   String
+  imageUrl  String?
+  order     Int     @default(0)
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([order])
+}
+
+model Subscription {
+  id                    String               @id @default(cuid())
+  companyId             String
+  planTier              PlanTier             @default(FREE)
+  billingCycle          BillingCycle?
+  status                SubscriptionStatus   @default(ACTIVE)
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  cancelAtPeriodEnd     Boolean              @default(false)
+  stripeCustomerId      String?              @unique
+  stripeSubscriptionId  String?              @unique
+  stripePriceId         String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  subscriptionStartDate DateTime?
+  billingAnchorDay      Int?
+  nextBillingAt         DateTime?
+  invoices              Invoice[]
+  company               Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  changes               SubscriptionChange[]
+  usageRecords          UsageRecord[]
+
+  @@index([companyId])
+  @@index([status])
+  @@index([planTier])
+}
+
+model SubscriptionChange {
+  id                    String              @id @default(cuid())
+  subscriptionId        String
+  changedBySuperAdminId String
+  action                SubscriptionAction
+  oldPlanTier           PlanTier?
+  newPlanTier           PlanTier?
+  oldStatus             SubscriptionStatus?
+  newStatus             SubscriptionStatus?
+  reason                String?
+  createdAt             DateTime            @default(now())
+  changedBySuperAdmin   User                @relation(fields: [changedBySuperAdminId], references: [id], onDelete: Cascade)
+  subscription          Subscription        @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([changedBySuperAdminId])
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  subscriptionId  String
+  amount          Float
+  currency        String        @default("usd")
+  status          InvoiceStatus
+  stripeInvoiceId String?       @unique
+  invoiceUrl      String?
+  pdfUrl          String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  createdAt       DateTime      @default(now())
+  paidAt          DateTime?
+  subscription    Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([status])
+}
+
+model UsageRecord {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  metric         String
+  quantity       Int
+  limit          Int?
+  periodStart    DateTime
+  periodEnd      DateTime
+  createdAt      DateTime     @default(now())
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@index([metric])
+}
+
+model UpgradeRequest {
+  id            String    @id @default(cuid())
+  companyId     String
+  name          String
+  companyName   String
+  email         String
+  phone         String?
+  message       String?
+  status        String    @default("PENDING")
+  notes         String?
+  processedById String?
+  processedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  processedBy   User?     @relation("ProcessedUpgradeRequests", fields: [processedById], references: [id])
+
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AiCreditsAddonRequest {
+  id               String                      @id @default(cuid())
+  companyId        String
+  message          String?
+  requestedCredits Int?
+  status           AiCreditsAddonRequestStatus @default(PENDING)
+  notes            String?
+  processedById    String?
+  processedAt      DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  company          Company                     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  processedBy      User?                       @relation("ProcessedAiCreditsAddonRequests", fields: [processedById], references: [id])
+
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CannedResponse {
+  id          String    @id @default(cuid())
+  companyId   String
+  title       String
+  content     String
+  shortcut    String?
+  category    String?
+  tags        String[]
+  isPublic    Boolean   @default(true)
+  createdById String?
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy   User?     @relation(fields: [createdById], references: [id])
+
+  @@index([companyId])
+  @@index([category])
+  @@index([shortcut])
+  @@index([deletedAt])
+}
+
+model ChatRating {
+  id        String      @id @default(cuid())
+  chatId    String      @unique
+  rating    RatingValue
+  comment   String?
+  agentId   String?
+  createdAt DateTime    @default(now())
+  agent     User?       @relation(fields: [agentId], references: [id])
+  chat      Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([rating])
+}
+
+model Attachment {
+  id           String   @id @default(cuid())
+  messageId    String
+  fileName     String
+  fileType     String
+  fileSize     Int
+  fileUrl      String
+  thumbnailUrl String?
+  uploadedById String?
+  createdAt    DateTime @default(now())
+  message      Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id])
+
+  @@index([messageId])
+}
+
+model Tag {
+  id        String    @id @default(cuid())
+  companyId String
+  name      String
+  color     String?   @default("#3B82F6")
+  createdAt DateTime  @default(now())
+  chats     ChatTag[]
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model ChatTag {
+  id        String   @id @default(cuid())
+  chatId    String
+  tagId     String
+  addedById String?
+  createdAt DateTime @default(now())
+  addedBy   User?    @relation(fields: [addedById], references: [id])
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, tagId])
+  @@index([chatId])
+  @@index([tagId])
+}
+
+model Department {
+  id              String             @id @default(cuid())
+  companyId       String
+  name            String
+  description     String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  deletedAt       DateTime?
+  assignmentRules AssignmentRule[]
+  chats           Chat[]
+  transfersFrom   ChatTransfer[]     @relation("TransfersFromDept")
+  transfersTo     ChatTransfer[]     @relation("TransfersToDept")
+  company         Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  members         DepartmentMember[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model DepartmentMember {
+  id           String     @id @default(cuid())
+  departmentId String
+  userId       String
+  role         String     @default("MEMBER")
+  createdAt    DateTime   @default(now())
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([departmentId, userId])
+  @@index([departmentId])
+  @@index([userId])
+}
+
+model BusinessHours {
+  id               String   @id @default(cuid())
+  propertyId       String   @unique
+  timezone         String   @default("UTC")
+  mondayEnabled    Boolean  @default(true)
+  mondayStart      String?  @default("09:00")
+  mondayEnd        String?  @default("17:00")
+  tuesdayEnabled   Boolean  @default(true)
+  tuesdayStart     String?  @default("09:00")
+  tuesdayEnd       String?  @default("17:00")
+  wednesdayEnabled Boolean  @default(true)
+  wednesdayStart   String?  @default("09:00")
+  wednesdayEnd     String?  @default("17:00")
+  thursdayEnabled  Boolean  @default(true)
+  thursdayStart    String?  @default("09:00")
+  thursdayEnd      String?  @default("17:00")
+  fridayEnabled    Boolean  @default(true)
+  fridayStart      String?  @default("09:00")
+  fridayEnd        String?  @default("17:00")
+  saturdayEnabled  Boolean  @default(false)
+  saturdayStart    String?
+  saturdayEnd      String?
+  sundayEnabled    Boolean  @default(false)
+  sundayStart      String?
+  sundayEnd        String?
+  holidays         Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  property         Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+}
+
+model AssignmentRule {
+  id                 String             @id @default(cuid())
+  companyId          String
+  propertyId         String?
+  name               String
+  type               AssignmentRuleType
+  priority           Int                @default(0)
+  schemaVersion      Int                @default(1)
+  targetDepartmentId String?
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property           Property?          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  targetDepartment   Department?        @relation(fields: [targetDepartmentId], references: [id])
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([isActive])
+}
+
+model ChatNote {
+  id          String   @id @default(cuid())
+  chatId      String
+  content     String
+  isPrivate   Boolean  @default(false)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+  @@index([createdById])
+}
+
+model AgentAvailability {
+  id           String      @id @default(cuid())
+  userId       String      @unique
+  status       AgentStatus @default(OFFLINE)
+  autoAway     Boolean     @default(false)
+  awayUntil    DateTime?
+  maxChats     Int         @default(5)
+  currentChats Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChatTransfer {
+  id               String      @id @default(cuid())
+  chatId           String
+  fromAgentId      String?
+  toAgentId        String?
+  fromDepartmentId String?
+  toDepartmentId   String?
+  reason           String?
+  createdAt        DateTime    @default(now())
+  chat             Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  fromAgent        User?       @relation("TransfersFrom", fields: [fromAgentId], references: [id])
+  fromDepartment   Department? @relation("TransfersFromDept", fields: [fromDepartmentId], references: [id])
+  toAgent          User?       @relation("TransfersTo", fields: [toAgentId], references: [id])
+  toDepartment     Department? @relation("TransfersToDept", fields: [toDepartmentId], references: [id])
+
+  @@index([chatId])
+  @@index([fromAgentId])
+  @@index([toAgentId])
+}
+
+model Webhook {
+  id              String            @id @default(cuid())
+  companyId       String
+  url             String
+  secret          String
+  events          String[]
+  isActive        Boolean           @default(true)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  company         Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deliveries      WebhookDelivery[]
+
+  @@index([companyId])
+  @@index([isActive])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  webhookId   String
+  event       String
+  payload     Json
+  statusCode  Int?
+  response    String?
+  error       String?
+  attemptedAt DateTime @default(now())
+  webhook     Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([attemptedAt])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String
+  keyHash     String
+  keyPrefix   String
+  scopes      String[]
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdById String
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([keyHash])
+}
+
+model CustomField {
+  id         String             @id @default(cuid())
+  companyId  String
+  name       String
+  type       CustomFieldType
+  options    String[]           @default([])
+  isRequired Boolean            @default(false)
+  targetType String
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  company    Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  values     CustomFieldValue[]
+
+  @@unique([companyId, targetType, name])
+  @@index([companyId])
+  @@index([targetType])
+}
+
+model CustomFieldValue {
+  id            String      @id @default(cuid())
+  customFieldId String
+  leadId        String?
+  chatId        String?
+  value         String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  chat          Chat?       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  customField   CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+  lead          Lead?       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([customFieldId])
+  @@index([leadId])
+  @@index([chatId])
+}
+
+model AuditLog {
+  id           String       @id @default(cuid())
+  companyId    String?
+  userId       String?
+  action       AuditAction
+  resourceType ResourceType
+  resourceId   String?
+  changes      Json?
+  metadata     Json?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime     @default(now())
+  company      Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType])
+  @@index([createdAt])
+}
+
+model EmailNotification {
+  id        String           @id @default(cuid())
+  companyId String
+  userId    String?
+  type      NotificationType
+  recipient String
+  subject   String
+  body      String
+  sentAt    DateTime?
+  error     String?
+  createdAt DateTime         @default(now())
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User?            @relation(fields: [userId], references: [id])
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([type])
+  @@index([sentAt])
+}
+
+model OfflineForm {
+  id           String            @id @default(cuid())
+  companyId    String
+  propertyId   String
+  name         String
+  email        String
+  phone        String?
+  message      String
+  status       OfflineFormStatus @default(PENDING)
+  assignedToId String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  assignedTo   User?             @relation(fields: [assignedToId], references: [id])
+  company      Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property     Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([status])
+}
+
+model ChatTranscript {
+  id           String   @id @default(cuid())
+  chatId       String   @unique
+  content      String
+  fileUrl      String?
+  exportedById String?
+  createdAt    DateTime @default(now())
+  chat         Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  exportedBy   User?    @relation(fields: [exportedById], references: [id])
+
+  @@index([exportedById])
+}
+
+model SlaRule {
+  id                String        @id @default(cuid())
+  companyId         String
+  name              String
+  firstResponseTime Int
+  resolutionTime    Int
+  priority          ChatPriority?
+  isActive          Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  metrics           SlaMetric[]
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([isActive])
+}
+
+model SlaMetric {
+  id                String    @id @default(cuid())
+  slaRuleId         String
+  chatId            String
+  firstResponseAt   DateTime?
+  firstResponseTime Int?
+  resolutionAt      DateTime?
+  resolutionTime    Int?
+  status            String    @default("PENDING")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  chat              Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  slaRule           SlaRule   @relation(fields: [slaRuleId], references: [id], onDelete: Cascade)
+
+  @@index([slaRuleId])
+  @@index([chatId])
+  @@index([status])
+}
+
+model Integration {
+  id          String          @id @default(cuid())
+  companyId   String
+  type        IntegrationType
+  name        String
+  config      Json
+  credentials Json?
+  isActive    Boolean         @default(true)
+  lastSyncAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  company     Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([type])
+  @@index([isActive])
+}
+
+model FeatureFlag {
+  id        String   @id @default(cuid())
+  companyId String
+  feature   String
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, feature])
+  @@index([companyId])
+}
+
+model ProactiveTrigger {
+  id         String      @id @default(cuid())
+  companyId  String
+  propertyId String
+  name       String
+  type       TriggerType
+  conditions Json
+  message    String
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  company    Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property   Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([isActive])
+}
+
+model FAQ {
+  id         String   @id @default(cuid())
+  companyId  String
+  propertyId String
+  question   String
+  answer     String
+  order      Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([isActive])
+  @@index([propertyId, isActive])
+}
+
+model QuickReply {
+  id         String   @id @default(cuid())
+  companyId  String
+  propertyId String
+  label      String
+  message    String
+  order      Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([isActive])
+  @@index([propertyId, isActive])
+}
+
+model ChatbotFlow {
+  id          String   @id @default(cuid())
+  companyId   String
+  propertyId  String
+  name        String
+  description String?
+  flow        Json
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([propertyId])
+  @@index([isActive])
+}
+
+model VisitorSegment {
+  id          String                 @id @default(cuid())
+  companyId   String
+  name        String
+  conditions  Json
+  description String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  company     Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  members     VisitorSegmentMember[]
+
+  @@index([companyId])
+}
+
+model VisitorSegmentMember {
+  id        String         @id @default(cuid())
+  segmentId String
+  visitorId String
+  createdAt DateTime       @default(now())
+  segment   VisitorSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  visitor   Visitor        @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+
+  @@unique([segmentId, visitorId])
+  @@index([segmentId])
+  @@index([visitorId])
+}
+
+model AutomationWorkflow {
+  id          String   @id @default(cuid())
+  companyId   String
+  name        String
+  description String?
+  trigger     Json
+  actions     Json
+  conditions  Json?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([isActive])
+}
+
+model MessageReadReceipt {
+  id        String   @id @default(cuid())
+  messageId String
+  chatId    String
+  userId    String?
+  readAt    DateTime @default(now())
+  updatedAt DateTime
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@index([chatId])
+  @@index([userId])
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  emoji     String
+  userId    String?
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@index([userId])
+}
+
+model AgentModuleAccess {
+  id                  String               @id @default(cuid())
+  userId              String               @unique
+  leadsAccess         Boolean              @default(false)
+  analyticsAccess     Boolean              @default(false)
+  propertiesAccess    Boolean              @default(false)
+  knowledgeBaseAccess Boolean              @default(false)
+  visitorsAccess      Boolean              @default(false)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  companyAccess       Boolean              @default(false)
+  billingAccess       Boolean              @default(false)
+  settingsAccess      Boolean              @default(false)
+  chatAccessScope     AgentChatAccessScope @default(ALL_CHATS)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AgentPropertyAccess {
+  id         String   @id @default(cuid())
+  userId     String
+  propertyId String
+  createdAt  DateTime @default(now())
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@index([propertyId])
+}
+
+enum OfflineFormStatus {
+  PENDING
+  ASSIGNED
+  RESOLVED
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  AGENT
+}
+
+enum ChatStatus {
+  ACTIVE
+  CLOSED
+  ARCHIVED
+  WAITING
+}
+
+enum ChatSource {
+  WIDGET
+  EMAIL
+  API
+  PROACTIVE
+  IMPORT
+}
+
+enum SenderType {
+  VISITOR
+  AGENT
+  BOT
+  SYSTEM
+}
+
+enum KnowledgeStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum EmbeddingVendor {
+  OPENAI
+  GEMINI
+  LOCAL
+}
+
+enum SourceType {
+  URL
+  FILE
+  TEXT
+}
+
+enum ResourceType {
+  COMPANY
+  USER
+  PROPERTY
+  VISITOR
+  LEAD
+  CHAT
+  MESSAGE
+  VISITOR_EVENT
+  CHAT_NOTE
+  CHAT_TAG
+  KNOWLEDGE_SOURCE
+  KNOWLEDGE_CHUNK
+  DEPARTMENT
+  DEPARTMENT_MEMBER
+  ASSIGNMENT_RULE
+  BUSINESS_HOURS
+  AGENT_AVAILABILITY
+  SUBSCRIPTION
+  SUBSCRIPTION_CHANGE
+  INVOICE
+  USAGE_RECORD
+  CANNED_RESPONSE
+  TAG
+  CUSTOM_FIELD
+  CUSTOM_FIELD_VALUE
+  INTEGRATION
+  WEBHOOK
+  API_KEY
+  OFFLINE_FORM
+  CHAT_TRANSCRIPT
+  SLA_RULE
+  SLA_METRIC
+}
+
+enum PlanTier {
+  FREE
+  PRO
+}
+
+enum BillingCycle {
+  MONTHLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  EXPIRED
+  SUSPENDED
+}
+
+enum SubscriptionAction {
+  UPGRADE
+  DOWNGRADE
+  CANCEL
+  SUSPEND
+  ACTIVATE
+}
+
+enum RatingValue {
+  POOR
+  FAIR
+  GOOD
+  VERY_GOOD
+  EXCELLENT
+}
+
+enum AssignmentRuleType {
+  ROUND_ROBIN
+  LEAST_BUSY
+  SKILL_BASED
+  DEPARTMENT
+  RANDOM
+}
+
+enum AgentStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+  BUSY
+}
+
+enum AgentChatAccessScope {
+  ALL_CHATS
+  ONLY_ASSIGNED_CHATS
+}
+
+enum ChatPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  EMAIL
+  PHONE
+  DATE
+  SELECT
+  MULTI_SELECT
+  BOOLEAN
+  URL
+}
+
+enum NotificationType {
+  NEW_CHAT
+  NEW_MESSAGE
+  CHAT_ASSIGNED
+  CHAT_CLOSED
+  RATING_RECEIVED
+  MENTION
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ASSIGN
+  TRANSFER
+  CLOSE
+  EXPORT
+  IMPORT
+  SUSPEND
+  ACTIVATE
+}
+
+enum LeadSource {
+  CHAT         @map("chat")
+  OFFLINE_FORM @map("offline_form")
+  WEBSITE      @map("website")
+  FACEBOOK_ADS @map("facebook_ads")
+  GOOGLE_ADS   @map("google_ads")
+  REFERRAL     @map("referral")
+  API          @map("api")
+  MANUAL       @map("manual")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  BUTTONS
+  CARDS
+  QUICK_REPLIES
+  LOCATION
+  CONTACT
+}
+
+enum IntegrationType {
+  ZAPIER
+  SLACK
+  WEBHOOK
+  API
+  EMAIL
+  CRM
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+  VOID
+}
+
+enum TriggerType {
+  TIME_ON_PAGE
+  SCROLL_DEPTH
+  EXIT_INTENT
+  BUTTON_CLICK
+  URL_PATTERN
+  RETURNING_VISITOR
+  CUSTOM_EVENT
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum CrmProvider {
+  WEBHOOK
+  HUBSPOT
+  ZOHO
+  SALESFORCE
+  PIPEDRIVE
+  FRESHSALES
+}
+
+enum CrmIntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum CrmLeadSource {
+  WEBSITE
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  MANUAL
+  API
+}
+
+enum CrmSyncAction {
+  CREATE_CONTACT
+  UPDATE_CONTACT
+  ADD_NOTE
+  SYNC_LEAD
+  TEST_CONNECTION
+}
+
+enum CrmSyncStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum CrmSyncTrigger {
+  LEAD_CREATED
+  CHAT_CLOSED
+  CHAT_ASSIGNED
+  MANUAL
+  TEST
+}
+
+enum ChatSound {
+  PING
+  CHIME
+  POP
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum AiStatus {
+  ACTIVE
+  LIMIT_REACHED
+}
+
+enum AiCreditsAddonRequestStatus {
+  PENDING
+  FULFILLED
+  REJECTED
+}
