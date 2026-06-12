@@ -31,17 +31,17 @@ function resolveProjectTitleId(): number {
     );
 }
 
-export const kylasConfig = {
-    apiKey: process.env.KYLAS_API_KEY || "",
-    baseUrl: process.env.KYLAS_API_BASE_URL || "https://api.kylas.io/v1",
-    timeoutMs: parseTimeoutMs(process.env.KYLAS_TIMEOUT_MS),
-    accountLeadSyncEnabled: resolveAccountLeadSyncEnabled(),
-    pipelineId: parsePositiveInt(process.env.KYLAS_PIPELINE_ID) ?? DEFAULT_PIPELINE_ID,
-    pipelineStageId: parsePositiveInt(process.env.KYLAS_PIPELINE_STAGE_ID) ?? DEFAULT_PIPELINE_STAGE_ID,
-    projectTitleId: resolveProjectTitleId(),
-    subSource: process.env.KYLAS_LEAD_SUB_SOURCE?.trim() || "Chatbot",
-    utmSource: process.env.KYLAS_UTM_SOURCE?.trim() || "chatbot",
-    utmMedium: process.env.KYLAS_UTM_MEDIUM?.trim() || "website-signup",
-    utmCampaign: process.env.KYLAS_UTM_CAMPAIGN?.trim() || "new-account-registration",
-} as const;
+// export const kylasConfig = {
+//     apiKey: process.env.KYLAS_API_KEY || "",
+//     baseUrl: process.env.KYLAS_API_BASE_URL || "https://api.kylas.io/v1",
+//     timeoutMs: parseTimeoutMs(process.env.KYLAS_TIMEOUT_MS),
+//     accountLeadSyncEnabled: resolveAccountLeadSyncEnabled(),
+//     pipelineId: parsePositiveInt(process.env.KYLAS_PIPELINE_ID) ?? DEFAULT_PIPELINE_ID,
+//     pipelineStageId: parsePositiveInt(process.env.KYLAS_PIPELINE_STAGE_ID) ?? DEFAULT_PIPELINE_STAGE_ID,
+//     projectTitleId: resolveProjectTitleId(),
+//     subSource: process.env.KYLAS_LEAD_SUB_SOURCE?.trim() || "Chatbot",
+//     utmSource: process.env.KYLAS_UTM_SOURCE?.trim() || "chatbot",
+//     utmMedium: process.env.KYLAS_UTM_MEDIUM?.trim() || "website-signup",
+//     utmCampaign: process.env.KYLAS_UTM_CAMPAIGN?.trim() || "new-account-registration",
+// } as const;
 

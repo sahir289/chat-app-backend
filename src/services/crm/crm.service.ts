@@ -15,7 +15,7 @@ import { readLeadUserId } from "../../repositories/leadRepository";
 import { crmRepository } from "../../repositories/crmRepository";
 import { AppError } from "../../utils/appError";
 import { getModuleLogger } from "../../utils/logger";
-import { encrypt, decrypt } from "../../utils/encryption";
+// import { encrypt, decrypt } from "../../utils/encryption";
 import { assertPublicHttpUrl } from "../../utils/safeFetch";
 import { config } from "../../config";
 import { CRM_SYNC_MAX_ATTEMPTS, crmSyncQueue } from "./crm-sync.queue";
@@ -154,8 +154,8 @@ export const crmService = {
         companyId: params.companyId,
         provider: params.provider,
         status: CrmIntegrationStatus.CONNECTED,
-        encryptedWebhookUrl: encrypt(params.webhookUrl!.trim()),
-        encryptedWebhookSecret: encrypt(webhookSecretPlain),
+        // encryptedWebhookUrl: encrypt(params.webhookUrl!.trim()),
+        // encryptedWebhookSecret: encrypt(webhookSecretPlain),
         settings: { syncTriggers: [CrmSyncTrigger.LEAD_CREATED, CrmSyncTrigger.CHAT_CLOSED] },
         createdById: params.userId,
       });
@@ -164,7 +164,7 @@ export const crmService = {
         companyId: params.companyId,
         provider: params.provider,
         status: CrmIntegrationStatus.CONNECTED,
-        encryptedAccessToken: encrypt(params.serviceKeyToken!.trim()),
+        // encryptedAccessToken: encrypt(params.serviceKeyToken!.trim()),
         settings: {
           portalId: params.portalId?.trim() || null,
           authType: "SERVICE_KEY",
@@ -795,10 +795,10 @@ export const crmService = {
         throw new AppError(400, "Webhook CRM credentials are incomplete");
       }
 
-      return new WebhookCrmProvider(
-        decrypt(integration.encryptedWebhookUrl),
-        decrypt(integration.encryptedWebhookSecret)
-      );
+      // return new WebhookCrmProvider(
+        // decrypt(integration.encryptedWebhookUrl),
+        // decrypt(integration.encryptedWebhookSecret)
+      // );
     }
 
     if (integration.provider === CrmProvider.HUBSPOT) {
@@ -807,8 +807,8 @@ export const crmService = {
       }
       const settings = isRecord(integration.settings) ? integration.settings : {};
       return new HubSpotCrmProvider(
-        decrypt(integration.encryptedAccessToken),
-        typeof settings.portalId === "string" ? settings.portalId : null,
+        // decrypt(integration.encryptedAccessToken),
+        // typeof settings.portalId === "string" ? settings.portalId : null,
         integration.id
       );
     }

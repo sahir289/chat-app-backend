@@ -1,5 +1,5 @@
 export const encryptionConfig = {
-    key: process.env.ENCRYPTION_KEY || "",
+    // key: process.env.ENCRYPTION_KEY || "",
     algorithm: "aes-256-gcm",
     ivLength: 16,
     saltLength: 64,

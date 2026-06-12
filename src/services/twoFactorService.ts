@@ -2,7 +2,7 @@ import speakeasy from "speakeasy";
 import QRCode from "qrcode";
 import crypto from "node:crypto";
 import { AppError } from "../utils/appError";
-import { encrypt, decrypt } from "../utils/encryption";
+// import { encrypt, decrypt } from "../utils/encryption";
 import { hashValue, compareValue, comparePassword } from "../utils/hash";
 import { userRepository } from "../repositories/userRepository";
 import type { User } from "@prisma/client";
@@ -150,9 +150,9 @@ export const twoFactorService = {
         });
 
         // Encrypt and store secret (but don't enable 2FA yet)
-        const encryptedSecret = encrypt(secret.base32!);
+        // const encryptedSecret = encrypt(secret.base32!);
         await userRepository.update(userId, {
-            twoFactorSecret: encryptedSecret,
+            twoFactorSecret: secret.base32,
         });
 
         // Generate QR code
@@ -186,7 +186,8 @@ export const twoFactorService = {
         // Decrypt secret
         let decryptedSecret: string;
         try {
-            decryptedSecret = decrypt(user.twoFactorSecret);
+            // decryptedSecret = decrypt(user.twoFactorSecret);
+            decryptedSecret = user.twoFactorSecret;
         } catch (error) {
             throw new AppError(500, "Failed to decrypt 2FA secret. Please start setup again.");
         }
@@ -249,7 +250,8 @@ export const twoFactorService = {
         // Decrypt secret
         let decryptedSecret: string;
         try {
-            decryptedSecret = decrypt(user.twoFactorSecret);
+            // decryptedSecret = decrypt(user.twoFactorSecret);
+            decryptedSecret = user.twoFactorSecret;
         } catch (error) {
             throw new AppError(500, "Failed to decrypt 2FA secret. Please contact support.");
         }

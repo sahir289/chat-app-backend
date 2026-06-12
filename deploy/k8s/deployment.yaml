@@ -89,6 +89,15 @@ spec:
                 name: chatbot-secrets
 
           ##################################################################
+          # Writable filesystem mounts
+          ##################################################################
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs   # ✅ FIX: required for winston file logging
+
+          ##################################################################
           # startupProbe:
           # Allows slow startup (DB connection, Redis connection, Prisma init).
           ##################################################################
@@ -151,13 +160,11 @@ spec:
               drop:
                 - ALL
 
-          ##################################################################
-          # Writable temp directory because root filesystem is read-only.
-          ##################################################################
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-
+      ##################################################################
+      # Volumes for writable paths
+      ##################################################################
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: logs
+          emptyDir: {}  

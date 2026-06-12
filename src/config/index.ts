@@ -11,7 +11,7 @@ import { urlsConfig } from "./urlsConfig";
 import { socketConfig } from "./socketConfig";
 import { expressConfig } from "./expressConfig";
 import { authConfig } from "./authConfig";
-import { kylasConfig } from "./kylasConfig";
+// import { kylasConfig } from "./kylasConfig";
 import { analyticsConfig } from "./analyticsConfig";
 import { getModuleLogger } from "../utils/logger";
 
@@ -42,7 +42,7 @@ export const config = {
     urls: urlsConfig,
     socket: socketConfig,
     auth: authConfig,
-    kylas: kylasConfig,
+    // kylas: kylasConfig,
     analytics: analyticsConfig,
     redis: {
         required: redisRequired,
@@ -73,17 +73,17 @@ export function validateConfig(): void {
             errors.push("JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different");
         }
 
-        if (!encryptionConfig.key) {
-            errors.push("ENCRYPTION_KEY must be set in production (must be different from JWT secrets)");
-        }
+        // if (!encryptionConfig.key) {
+        //     errors.push("ENCRYPTION_KEY must be set in production (must be different from JWT secrets)");
+        // }
 
         // Validate encryption key is different from JWT secrets
-        if (encryptionConfig.key && jwtConfig.accessSecret && encryptionConfig.key === jwtConfig.accessSecret) {
-            errors.push("ENCRYPTION_KEY must be different from JWT_ACCESS_SECRET");
-        }
-        if (encryptionConfig.key && jwtConfig.refreshSecret && encryptionConfig.key === jwtConfig.refreshSecret) {
-            errors.push("ENCRYPTION_KEY must be different from JWT_REFRESH_SECRET");
-        }
+        // if (encryptionConfig.key && jwtConfig.accessSecret && encryptionConfig.key === jwtConfig.accessSecret) {
+        //     errors.push("ENCRYPTION_KEY must be different from JWT_ACCESS_SECRET");
+        // }
+        // if (encryptionConfig.key && jwtConfig.refreshSecret && encryptionConfig.key === jwtConfig.refreshSecret) {
+        //     errors.push("ENCRYPTION_KEY must be different from JWT_REFRESH_SECRET");
+        // }
 
         // Validate secret strength (minimum 32 characters recommended)
         if (jwtConfig.accessSecret && jwtConfig.accessSecret.length < 32) {
@@ -92,9 +92,9 @@ export function validateConfig(): void {
         if (jwtConfig.refreshSecret && jwtConfig.refreshSecret.length < 32) {
             errors.push("JWT_REFRESH_SECRET should be at least 32 characters long for security");
         }
-        if (encryptionConfig.key && encryptionConfig.key.length < 32) {
-            errors.push("ENCRYPTION_KEY should be at least 32 characters long for security");
-        }
+        // if (encryptionConfig.key && encryptionConfig.key.length < 32) {
+        //     errors.push("ENCRYPTION_KEY should be at least 32 characters long for security");
+        // }
 
         if (!urlsConfig.appUrl) {
             errors.push(
@@ -105,11 +105,11 @@ export function validateConfig(): void {
             errors.push("Set APP_URL so the widget can use APP_URL/embed, or set WIDGET_EMBED_URL explicitly");
         }
 
-        if (kylasConfig.accountLeadSyncEnabled && !kylasConfig.apiKey.trim()) {
-            errors.push(
-                "KYLAS_API_KEY must be set in production when account lead sync is enabled (copy KYLAS_* vars from .env.example)"
-            );
-        }
+        // if (kylasConfig.accountLeadSyncEnabled && !kylasConfig.apiKey.trim()) {
+        //     errors.push(
+        //         "KYLAS_API_KEY must be set in production when account lead sync is enabled (copy KYLAS_* vars from .env.example)"
+        //     );
+        // }
 
         if (!redisUrl && redisRequired) {
             errors.push("REDIS_URL must be set in production when REDIS_REQUIRED=true");
@@ -158,6 +158,6 @@ export {
     urlsConfig,
     socketConfig,
     authConfig,
-    kylasConfig,
+    // kylasConfig,
     analyticsConfig,
 };

@@ -34,7 +34,7 @@ import { passwordChangedTemplate } from "../email/templates/auth/passwordChanged
 import { resetPasswordTemplate } from "../email/templates/auth/resetPasswordTemplate";
 import { runRegistrationWorkflow } from "../helpers/auth/registerWorkflow";
 import { config } from "../config";
-import { kylasLeadService } from "./kylasLeadService";
+// import { kylasLeadService } from "./kylasLeadService";
 import { twoFactorService } from "./twoFactorService";
 import prisma from "../lib/prisma";
 import { validatePasswordStrength } from "../utils/passwordValidation";
@@ -109,19 +109,19 @@ export const authService = {
             });
         }
 
-        if (config.kylas.accountLeadSyncEnabled) {
-            void kylasLeadService.createAccountLead({
-                fullName,
-                email: normalizedEmail,
-                phone,
-                companyName: finalCompanyName,
-            }).catch((error) => {
-                log.warn("Non-blocking Kylas lead sync failed", {
-                    email: normalizedEmail,
-                    error: toErrorMessage(error),
-                });
-            });
-        }
+        // if (config.kylas.accountLeadSyncEnabled) {
+        //     void kylasLeadService.createAccountLead({
+        //         fullName,
+        //         email: normalizedEmail,
+        //         phone,
+        //         companyName: finalCompanyName,
+        //     }).catch((error) => {
+        //         log.warn("Non-blocking Kylas lead sync failed", {
+        //             email: normalizedEmail,
+        //             error: toErrorMessage(error),
+        //         });
+        //     });
+        // }
 
         return { user, property, companyId };
     },
