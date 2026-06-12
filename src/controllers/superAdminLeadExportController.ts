@@ -129,11 +129,12 @@ export async function exportSuperAdminLeadsHandler(
 
 function exportCSV(res: Response, leads: any[], filename: string) {
 
-    const headers = ["Company", "Property", "Name", "Email", "Phone", "Status", "Source", "Date Created"];
+    const headers = ["Company", "Property", "Name", "User ID", "Email", "Phone", "Status", "Source", "Date Created"];
     const rows = leads.map((lead) => [
         lead.company?.name || "",
         lead.property?.name || "",
         lead.fullName || "",
+        lead.userId || "",
         lead.email || "",
         lead.phone || "",
         lead.status || "",
@@ -319,6 +320,7 @@ async function exportExcel(res: Response, leads: any[], filename: string) {
         { header: "Company", key: "company", width: 20 },
         { header: "Property", key: "property", width: 20 },
         { header: "Name", key: "name", width: 25 },
+        { header: "User ID", key: "userId", width: 20 },
         { header: "Email", key: "email", width: 30 },
         { header: "Phone", key: "phone", width: 20 },
         { header: "Status", key: "status", width: 15 },
@@ -340,6 +342,7 @@ async function exportExcel(res: Response, leads: any[], filename: string) {
             company: lead.company?.name || "",
             property: lead.property?.name || "",
             name: lead.fullName || "",
+            userId: lead.userId || "",
             email: lead.email || "",
             phone: lead.phone || "",
             status: lead.status || "",

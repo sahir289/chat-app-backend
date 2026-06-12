@@ -15,6 +15,10 @@ import { uploadMiddleware } from "../middlewares/uploadMiddleware";
 import { asyncHandler } from "../middlewares/asyncHandler";
 import { errorResponse, successResponse } from "../utils/apiResponse";
 import { Role } from "@prisma/client";
+import {
+  conversationRoutingService,
+  type BusinessHoursPayload,
+} from "../services/conversationRoutingService";
 
 /**
  * Helper function to enforce strict companyId requirement.
@@ -83,10 +87,6 @@ export async function deletePropertyHandler(
   if (!companyId) return;
 
   const { id } = req.params;
-  if (!id) {
-    return errorResponse(res, { message: "id is required", statusCode: 400 });
-  }
-
   const user = req.user;
   const userId = user?.id;
   const userRole = user?.role;
@@ -103,10 +103,6 @@ export async function updatePropertySettingsHandler(
   if (!companyId) return;
 
   const { id } = req.params;
-  if (!id) {
-    return errorResponse(res, { message: "id is required", statusCode: 400 });
-  }
-
   const user = req.user;
   const userId = user?.id;
   const userRole = user?.role;
@@ -193,10 +189,6 @@ export async function getPropertyHandler(
   if (!companyId) return;
 
   const { id } = req.params;
-  if (!id) {
-    return errorResponse(res, { message: "id is required", statusCode: 400 });
-  }
-
   const user = req.user;
   const userId = user?.id;
   const userRole = user?.role;
@@ -227,10 +219,6 @@ export async function updatePropertyHandler(
   if (!companyId) return;
 
   const { id } = req.params;
-  if (!id) {
-    return errorResponse(res, { message: "id is required", statusCode: 400 });
-  }
-
   const user = req.user;
   const userRole = user?.role;
 
@@ -285,6 +273,60 @@ export async function updatePropertyHandler(
   return successResponse(res, { data: updated, statusCode: 200 });
 }
 
+export async function getPropertyBusinessHoursHandler(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  const companyId = requireCompanyId(req, res);
+  if (!companyId) return;
+
+  const { id } = req.params;
+  const user = req.user;
+  const userId = user?.id;
+  const userRole = user?.role;
+
+  if (userRole === Role.AGENT && userId) {
+    const hasAccess = await checkAgentPropertyAccess(userId, id);
+    if (!hasAccess) {
+      return errorResponse(res, { message: "Access denied", statusCode: 403 });
+    }
+  }
+
+  const businessHours = await conversationRoutingService.getBusinessHours(id, companyId);
+  if (!businessHours) {
+    return errorResponse(res, { message: "Property not found", statusCode: 404 });
+  }
+
+  return successResponse(res, { data: businessHours, statusCode: 200 });
+}
+
+export async function updatePropertyBusinessHoursHandler(
+  req: AuthenticatedRequest,
+  res: Response
+) {
+  const companyId = requireCompanyId(req, res);
+  if (!companyId) return;
+
+  const { id } = req.params;
+  if (req.user?.role === Role.AGENT) {
+    return errorResponse(res, {
+      message: "Access denied. Agents cannot update business hours.",
+      statusCode: 403,
+    });
+  }
+
+  const businessHours = await conversationRoutingService.upsertBusinessHours(
+    id,
+    companyId,
+    req.body as BusinessHoursPayload
+  );
+  if (!businessHours) {
+    return errorResponse(res, { message: "Property not found", statusCode: 404 });
+  }
+
+  return successResponse(res, { data: businessHours, statusCode: 200 });
+}
+
 export async function getPropertyCodeHandler(
   req: AuthenticatedRequest,
   res: Response
@@ -293,10 +335,6 @@ export async function getPropertyCodeHandler(
   if (!companyId) return;
 
   const { id } = req.params;
-  if (!id) {
-    return errorResponse(res, { message: "id is required", statusCode: 400 });
-  }
-
   const user = req.user;
   const userId = user?.id;
   const userRole = user?.role;
@@ -325,9 +363,6 @@ export async function getPropertySettingsByWidgetKeyHandler(
   res: Response
 ) {
   const { widgetKey } = req.params;
-  if (!widgetKey) {
-    return errorResponse(res, { message: "widgetKey is required", statusCode: 400 });
-  }
 
   const settings = await propertyService.getSettingsByWidgetKey(widgetKey);
   if (!settings) {
@@ -344,10 +379,6 @@ export const uploadLogoHandler = [
     if (!companyId) return;
 
     const { id } = req.params;
-    if (!id) {
-      return errorResponse(res, { message: "id is required", statusCode: 400 });
-    }
-
     const user = req.user;
 
     const file = req.file;

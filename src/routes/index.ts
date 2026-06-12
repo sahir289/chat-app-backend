@@ -28,6 +28,8 @@ import superAdminUsersRouter from "./superAdmin/users";
 import superAdminOpenAiRouter from "./superAdmin/openai";
 import superAdminStatsRouter from "./superAdmin/stats";
 import superAdminLeadsRouter from "./superAdmin/leads";
+import superAdminWebsiteAnalyticsRouter from "./superAdmin/websiteAnalytics";
+import websiteAnalyticsTrackRouter from "./websiteAnalyticsTrack";
 import twoFactorRouter from "./twoFactorRoutes";
 import featureAccessRouter from "./featureAccess";
 import moduleAccessRouter from "./moduleAccess";
@@ -92,6 +94,10 @@ router.use("/super-admin/openai", superAdminOpenAiRouter);
 router.use("/super-admin/stats", superAdminStatsRouter);
 
 router.use("/super-admin/leads", superAdminLeadsRouter);
+
+router.use("/super-admin/website-analytics", superAdminWebsiteAnalyticsRouter);
+
+router.use("/analytics", websiteAnalyticsTrackRouter);
 
 router.use("/feature-access", featureAccessRouter);
 

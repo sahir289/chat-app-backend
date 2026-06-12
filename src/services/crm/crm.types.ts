@@ -15,7 +15,8 @@ export type NormalizedCrmLead = {
   source: CrmLeadSource;
   channel: string;
   name: string;
-  email: string;
+  email: string | null;
+  userId: string | null;
   phone: string | null;
   companyName: string | null;
   message: string | null;

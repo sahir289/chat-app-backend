@@ -4,6 +4,7 @@ import { chatService } from "../services/chatService";
 import { messageRepository } from "../repositories/messageRepository";
 import { chatRepository } from "../repositories/chatRepository";
 import { attachmentRepository } from "../repositories/attachmentRepository";
+import { userRepository } from "../repositories/userRepository";
 import { Role, SenderType } from "@prisma/client";
 import { successResponse, errorResponse } from "../utils/apiResponse";
 import { getIO, broadcastMessage, SOCKET_EVENTS, isVisitorOnline } from "../socket/index";
@@ -11,21 +12,19 @@ import { getChatRoom, getPropertyRoom } from "../socket/helpers";
 import { assertAgentCanAccessChatOrThrow } from "../utils/agentPropertyFilter";
 import { validateMessageLength } from "../utils/messageValidation";
 import { getPresignedUrl } from "../services/s3Service";
+import { DEFAULT_MESSAGES_LIMIT } from "../constants/messagePagination";
 
 export async function getMessagesHandler(
   req: AuthenticatedRequest,
   res: Response
 ) {
-  const { chatId } = req.params;
+  const chatId = (req.params.chatId || req.params.id) as string;
   const companyId = req.user?.companyId;
   const userId = req.user?.id;
 
   if (!companyId) {
     return errorResponse(res, { message: "Forbidden: Company context required", statusCode: 403 });
   }
-
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 50;
 
   const chat = await chatRepository.findById(chatId, companyId);
 
@@ -37,45 +36,27 @@ export async function getMessagesHandler(
     await assertAgentCanAccessChatOrThrow(userId, chat);
   }
 
-  // Get messages - handle errors gracefully
+  const limit = req.query.limit as string | undefined;
+  const cursor = req.query.cursor as string | undefined;
+
   let result;
   try {
-    result = await chatService.getMessages(chatId, companyId, page, limit);
-  } catch (err: any) {
-
-    // Check if it's a Prisma error that we should handle gracefully
-    if (err?.code?.startsWith('P')) { /* empty */ }
-
-    // Return empty result instead of failing
+    result = await chatService.getMessagesCursor(chatId, companyId, { limit, cursor });
+  } catch {
     result = {
-      chat: {
-        id: chat.id,
-        propertyId: chat.propertyId,
-        sessionId: chat.sessionId,
-        status: chat.status,
-        createdAt: chat.createdAt,
-      },
       messages: [],
-      total: 0,
-      page,
-      limit,
+      nextCursor: null,
+      hasMore: false,
+      limit: DEFAULT_MESSAGES_LIMIT,
     };
   }
 
-  // Ensure we always return a valid response
   if (!result) {
     result = {
-      chat: {
-        id: chat.id,
-        propertyId: chat.propertyId,
-        sessionId: chat.sessionId,
-        status: chat.status,
-        createdAt: chat.createdAt,
-      },
       messages: [],
-      total: 0,
-      page,
-      limit,
+      nextCursor: null,
+      hasMore: false,
+      limit: DEFAULT_MESSAGES_LIMIT,
     };
   }
 
@@ -234,6 +215,10 @@ export async function createMessageHandler(
 
   // Broadcast via socket using shared utility
   const io = getIO();
+  const senderUser =
+    normalizedSenderType === SenderType.AGENT
+      ? await userRepository.findById(finalAgentId || currentUser.id)
+      : null;
 
   broadcastMessage(
     io,
@@ -243,6 +228,10 @@ export async function createMessageHandler(
       senderType: message.senderType,
       text: message.text || "",
       createdAt: message.createdAt,
+      senderName:
+        normalizedSenderType === SenderType.AGENT
+          ? senderUser?.name || senderUser?.email || null
+          : null,
       attachments: messageAttachments,
     },
     {

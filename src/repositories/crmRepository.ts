@@ -199,6 +199,10 @@ export const crmRepository = {
         ...(params.status ? { status: params.status } : {}),
         ...(params.provider ? { provider: params.provider } : {}),
         ...(params.leadId ? { leadId: params.leadId } : {}),
+        OR: [
+          { leadId: null, chatId: null },
+          { lead: { is: { property: { deletedAt: null } } } },
+        ],
       },
       orderBy: { createdAt: "desc" },
       take: params.limit,

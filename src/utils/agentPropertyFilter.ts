@@ -7,6 +7,25 @@ import { AgentChatAccessScope, Role } from "@prisma/client";
  * Get property filter for agent queries
  * Returns property IDs that the agent has access to, or null if no filter needed (admin/owner)
  */
+export type AgentPropertyScope =
+    | { filtered: false }
+    | { filtered: true; propertyIds: string[] };
+
+export async function getAgentPropertyScope(
+    userId: string | undefined
+): Promise<AgentPropertyScope> {
+    if (!userId) {
+        return { filtered: false };
+    }
+
+    const propertyFilter = await getAgentPropertyFilter(userId);
+    if (!propertyFilter.isFiltered || propertyFilter.propertyIds === null) {
+        return { filtered: false };
+    }
+
+    return { filtered: true, propertyIds: propertyFilter.propertyIds };
+}
+
 export async function getAgentPropertyFilter(userId: string): Promise<{
     propertyIds: string[] | null;
     isFiltered: boolean;

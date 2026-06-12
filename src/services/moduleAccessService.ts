@@ -1,6 +1,11 @@
 import prisma from "../lib/prisma";
-import { Role, type SubscriptionStatus } from "@prisma/client";
+import { Role, SubscriptionStatus, type PlanTier } from "@prisma/client";
 import { agentAccessService } from "./agentAccessService";
+import {
+    resolveSubscriptionAccess,
+    subscriptionAccessSelect,
+    subscriptionService,
+} from "./subscriptionService";
 
 export type ModuleName =
     | "chats"
@@ -32,6 +37,37 @@ export type ModuleName =
     | "subscriptions"
     | "visitors";
 
+const ALL_MODULES: ModuleName[] = [
+    "chats",
+    "messages",
+    "leads",
+    "properties",
+    "analytics",
+    "team",
+    "company",
+    "billing",
+    "account",
+    "attachments",
+    "chat_ratings",
+    "chat_notes",
+    "tags",
+    "canned_responses",
+    "api_keys",
+    "webhooks",
+    "departments",
+    "assignment_rules",
+    "custom_fields",
+    "sla_management",
+    "integrations",
+    "feature_flags",
+    "proactive_triggers",
+    "automation_workflows",
+    "visitor_segments",
+    "knowledge_base",
+    "subscriptions",
+    "visitors",
+];
+
 // FREE modules available to all users
 export const FREE_MODULES: ModuleName[] = [
     "chats",
@@ -47,38 +83,32 @@ export const FREE_MODULES: ModuleName[] = [
     "subscriptions",
 ];
 
+type AgentAccessModule =
+    | "leads"
+    | "analytics"
+    | "properties"
+    | "knowledge_base"
+    | "visitors"
+    | "company"
+    | "billing"
+    | "settings";
+
+const AGENT_CORE_MODULES = new Set<ModuleName>(["chats", "messages", "attachments"]);
+
+const AGENT_MODULE_ACCESS_MAP: Partial<Record<ModuleName, AgentAccessModule>> = {
+    leads: "leads",
+    analytics: "analytics",
+    properties: "properties",
+    knowledge_base: "knowledge_base",
+    visitors: "visitors",
+    company: "company",
+    billing: "billing",
+    account: "settings",
+};
+
 // Helper to get all modules
 function getAllModules(): ModuleName[] {
-    return [
-        "chats",
-        "messages",
-        "leads",
-        "properties",
-        "analytics",
-        "team",
-        "company",
-        "billing",
-        "account",
-        "attachments",
-        "chat_ratings",
-        "chat_notes",
-        "tags",
-        "canned_responses",
-        "api_keys",
-        "webhooks",
-        "departments",
-        "assignment_rules",
-        "custom_fields",
-        "sla_management",
-        "integrations",
-        "feature_flags",
-        "proactive_triggers",
-        "automation_workflows",
-        "visitor_segments",
-        "knowledge_base",
-        "subscriptions",
-        "visitors",
-    ];
+    return [...ALL_MODULES];
 }
 
 export const moduleAccessService = {
@@ -97,6 +127,11 @@ export const moduleAccessService = {
                             where: {
                                 feature: module,
                             },
+                        },
+                        subscriptions: {
+                            orderBy: { createdAt: "desc" },
+                            take: 1,
+                            select: subscriptionAccessSelect,
                         },
                     },
                 },
@@ -121,22 +156,32 @@ export const moduleAccessService = {
             return { allowed: false, reason: "No company found" };
         }
 
-        // Use company.isPro as single source of truth for PRO access
-        // This is set by super admin when approving upgrade requests
-        const isPro = user.company.isPro;
+        const downgraded = await subscriptionService.ensureCompanyPlanMatchesSubscription(user.company.id);
+        if (downgraded) {
+            user.company.isPro = false;
+        }
+
+        const subscriptionAccess = resolveSubscriptionAccess({
+            isPro: user.company.isPro,
+            subscription: user.company.subscriptions[0] ?? null,
+        });
+        const hasActiveProAccess = subscriptionAccess.canAccessPaidFeatures;
 
         const isFreeModule = FREE_MODULES.includes(module);
 
         // For FREE companies, always return the upgrade message for PRO-only modules.
         // This avoids showing "disabled by admin" for modules they are not entitled to use.
-        if (!isPro && !isFreeModule) {
-            return { allowed: false, reason: "Module requires PRO access. Please upgrade to Pro." };
+        if (!hasActiveProAccess && !isFreeModule) {
+            return {
+                allowed: false,
+                reason: subscriptionAccess.reason || "Module requires active PRO access. Please upgrade to Pro.",
+            };
         }
 
         // Check if module is disabled by admin (overrides everything except Super Admin)
         // Free modules should remain accessible for FREE companies.
         const moduleFlag = user.company.featureFlags.find((f) => f.feature === module);
-        if (moduleFlag && !moduleFlag.enabled) {
+        if (moduleFlag && !moduleFlag.enabled && (hasActiveProAccess || !isFreeModule)) {
             return {
                 allowed: false,
                 reason: "Module has been disabled by Super Admin",
@@ -145,37 +190,16 @@ export const moduleAccessService = {
         }
 
         // If PRO, allow all modules (unless disabled above)
-        if (isPro) {
+        if (hasActiveProAccess) {
             // Check user role restrictions
             if (user.role === Role.AGENT) {
                 // Chats, messages, and attachments (file upload in chat) are always allowed for agents
-                if (module === "chats" || module === "messages" || module === "attachments") {
+                if (AGENT_CORE_MODULES.has(module)) {
                     return { allowed: true };
                 }
 
                 // For PRO companies, check agent-specific module access
-                const agentModuleMap: Record<
-                    string,
-                    | "leads"
-                    | "analytics"
-                    | "properties"
-                    | "knowledge_base"
-                    | "visitors"
-                    | "company"
-                    | "billing"
-                    | "settings"
-                > = {
-                    leads: "leads",
-                    analytics: "analytics",
-                    properties: "properties",
-                    knowledge_base: "knowledge_base",
-                    visitors: "visitors",
-                    company: "company",
-                    billing: "billing",
-                    account: "settings",
-                };
-
-                const agentModule = agentModuleMap[module];
+                const agentModule = AGENT_MODULE_ACCESS_MAP[module];
                 if (agentModule) {
                     const hasAccess = await agentAccessService.checkAgentModuleAccess(user.id, agentModule);
                     if (!hasAccess) {
@@ -195,33 +219,12 @@ export const moduleAccessService = {
         // Check user role restrictions for FREE modules
         if (user.role === Role.AGENT) {
             // Chats, messages, and attachments (file upload in chat) are always allowed for agents
-            if (module === "chats" || module === "messages" || module === "attachments") {
+            if (AGENT_CORE_MODULES.has(module)) {
                 return { allowed: true };
             }
 
             // For FREE companies, check agent-specific module access if admin has granted it
-            const agentModuleMap: Record<
-                string,
-                | "leads"
-                | "analytics"
-                | "properties"
-                | "knowledge_base"
-                | "visitors"
-                | "company"
-                | "billing"
-                | "settings"
-            > = {
-                leads: "leads",
-                analytics: "analytics",
-                properties: "properties",
-                knowledge_base: "knowledge_base",
-                visitors: "visitors",
-                company: "company",
-                billing: "billing",
-                account: "settings",
-            };
-
-            const agentModule = agentModuleMap[module];
+            const agentModule = AGENT_MODULE_ACCESS_MAP[module];
             if (agentModule) {
                 const hasAccess = await agentAccessService.checkAgentModuleAccess(user.id, agentModule);
                 if (hasAccess) {
@@ -246,6 +249,11 @@ export const moduleAccessService = {
                         id: true,
                         isPro: true,
                         featureFlags: true,
+                        subscriptions: {
+                            orderBy: { createdAt: "desc" },
+                            take: 1,
+                            select: subscriptionAccessSelect,
+                        },
                     },
                 },
             },
@@ -263,8 +271,16 @@ export const moduleAccessService = {
             return this.getAllModulesDenied();
         }
 
-        // Use company.isPro as single source of truth
-        const isPro = user.company.isPro;
+        const downgraded = await subscriptionService.ensureCompanyPlanMatchesSubscription(user.company.id);
+        if (downgraded) {
+            user.company.isPro = false;
+        }
+
+        const subscriptionAccess = resolveSubscriptionAccess({
+            isPro: user.company.isPro,
+            subscription: user.company.subscriptions[0] ?? null,
+        });
+        const hasActiveProAccess = subscriptionAccess.canAccessPaidFeatures;
         const featureFlags = (user.company.featureFlags || []) as Array<{ feature: string; enabled: boolean }>;
 
         const access: Record<ModuleName, boolean> = {} as Record<ModuleName, boolean>;
@@ -272,8 +288,6 @@ export const moduleAccessService = {
 
         // Agent role restrictions
         const isAgent = user.role === Role.AGENT;
-        // Agent modules allowed for FREE companies
-        const agentModules = new Set<ModuleName>(["chats", "messages", "leads", "analytics"]);
 
         for (const module of modules) {
             // Check if module is disabled by admin (overrides everything except Super Admin)
@@ -283,7 +297,7 @@ export const moduleAccessService = {
             if (moduleFlag && !moduleFlag.enabled) {
                 // Only block if it's a PRO-only module, or if company is PRO
                 // Free modules should always be accessible to free companies
-                if (isPro || !isFreeModule) {
+                if (hasActiveProAccess || !isFreeModule) {
                     access[module] = false;
                     continue;
                 }
@@ -291,38 +305,17 @@ export const moduleAccessService = {
             }
 
             // If PRO, allow all modules (unless disabled above)
-            if (isPro) {
+            if (hasActiveProAccess) {
                 // Check user role restrictions
                 if (isAgent) {
                     // Chats, messages, and attachments are always allowed for agents
-                    if (module === "chats" || module === "messages" || module === "attachments") {
+                    if (AGENT_CORE_MODULES.has(module)) {
                         access[module] = true;
                         continue;
                     }
 
                     // For PRO companies, check agent-specific module access
-                    const agentModuleMap: Record<
-                        string,
-                        | "leads"
-                        | "analytics"
-                        | "properties"
-                        | "knowledge_base"
-                        | "visitors"
-                        | "company"
-                        | "billing"
-                        | "settings"
-                    > = {
-                        leads: "leads",
-                        analytics: "analytics",
-                        properties: "properties",
-                        knowledge_base: "knowledge_base",
-                        visitors: "visitors",
-                        company: "company",
-                        billing: "billing",
-                        account: "settings",
-                    };
-
-                    const agentModule = agentModuleMap[module];
+                    const agentModule = AGENT_MODULE_ACCESS_MAP[module];
                     if (agentModule) {
                         const hasAccess = await agentAccessService.checkAgentModuleAccess(user.id, agentModule);
                         access[module] = hasAccess;
@@ -346,34 +339,13 @@ export const moduleAccessService = {
             // Check user role restrictions for FREE modules
             if (isAgent) {
                 // Chats, messages, and attachments are always allowed for agents
-                if (module === "chats" || module === "messages" || module === "attachments") {
+                if (AGENT_CORE_MODULES.has(module)) {
                     access[module] = true;
                     continue;
                 }
 
                 // For FREE companies, check agent-specific module access if admin has granted it
-                const agentModuleMap: Record<
-                    string,
-                    | "leads"
-                    | "analytics"
-                    | "properties"
-                    | "knowledge_base"
-                    | "visitors"
-                    | "company"
-                    | "billing"
-                    | "settings"
-                > = {
-                    leads: "leads",
-                    analytics: "analytics",
-                    properties: "properties",
-                    knowledge_base: "knowledge_base",
-                    visitors: "visitors",
-                    company: "company",
-                    billing: "billing",
-                    account: "settings",
-                };
-
-                const agentModule = agentModuleMap[module];
+                const agentModule = AGENT_MODULE_ACCESS_MAP[module];
                 if (agentModule) {
                     const hasAccess = await agentAccessService.checkAgentModuleAccess(user.id, agentModule);
                     access[module] = hasAccess;
@@ -395,7 +367,7 @@ export const moduleAccessService = {
         modules: Record<ModuleName, boolean>;
         subscription: {
             status: SubscriptionStatus | null;
-            planTier: string | null;
+            planTier: PlanTier | null;
             isActive: boolean;
         };
         disabledModules: ModuleName[];
@@ -409,6 +381,11 @@ export const moduleAccessService = {
                         id: true,
                         isPro: true,
                         featureFlags: true,
+                        subscriptions: {
+                            orderBy: { createdAt: "desc" },
+                            take: 1,
+                            select: subscriptionAccessSelect,
+                        },
                     },
                 },
             },
@@ -431,7 +408,7 @@ export const moduleAccessService = {
             return {
                 modules: this.getAllModulesAllowed(),
                 subscription: {
-                    status: "ACTIVE",
+                    status: SubscriptionStatus.ACTIVE,
                     planTier: null, // Do not return "PRO" as planTier
                     isActive: true,
                 },
@@ -453,9 +430,16 @@ export const moduleAccessService = {
             };
         }
 
-        // Use company.isPro as single source of truth
-        // This value is set by super admin when approving upgrade requests
-        const isPro = user.company.isPro;
+        const downgraded = await subscriptionService.ensureCompanyPlanMatchesSubscription(user.company.id);
+        if (downgraded) {
+            user.company.isPro = false;
+        }
+
+        const subscriptionAccess = resolveSubscriptionAccess({
+            isPro: user.company.isPro,
+            subscription: user.company.subscriptions[0] ?? null,
+        });
+        const hasActiveProAccess = subscriptionAccess.canAccessPaidFeatures;
         const featureFlags = (user.company.featureFlags || []) as Array<{ feature: string; enabled: boolean }>;
         const disabledModules = featureFlags
             .filter((f: { enabled: boolean; feature: string }) => !f.enabled)
@@ -466,12 +450,12 @@ export const moduleAccessService = {
         return {
             modules,
             subscription: {
-                status: "ACTIVE", // Always active in simplified model
-                planTier: null, // Do not return or use planTier - use isPro instead
-                isActive: true,
+                status: subscriptionAccess.status,
+                planTier: subscriptionAccess.planTier,
+                isActive: subscriptionAccess.isActive,
             },
             disabledModules,
-            isPro, // Single source of truth for PRO access
+            isPro: hasActiveProAccess,
         };
     },
 

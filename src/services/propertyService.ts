@@ -10,6 +10,9 @@ import { checkAgentPropertyAccess } from "../utils/agentPropertyFilter";
 import { getPresignedUrl } from "./s3Service";
 import { Role } from "@prisma/client";
 import { defaultOpenAiChatFallback, resolveEffectiveOpenAiChatModel, sanitizeOpenAiModelIdList } from "../utils/openaiChatModelResolver";
+import { getModuleLogger } from "../utils/logger";
+
+const log = getModuleLogger("propertyService");
 const nanoid = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 24);
 
 export const propertyService = {
@@ -110,7 +113,7 @@ export const propertyService = {
           // If access record already exists (shouldn't happen for new property), ignore
           // If it's a different error, log but don't fail the property creation
           if (accessError?.code !== "P2002") {
-            console.error("Failed to grant agent access to newly created property:", accessError);
+            log.error("Failed to grant agent access to newly created property:", accessError);
           }
         }
       }
@@ -516,7 +519,7 @@ export const propertyService = {
             chatId: { in: chatIds },
             deletedAt: null,
           },
-          data: { deletedAt: now },
+          data: { deletedAt: now, isDeleted: true },
         });
 
         await tx.chat.updateMany({

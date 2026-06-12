@@ -1,0 +1,14 @@
+# Prevents voluntary disruptions from taking down too many pods.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+
+metadata:
+  name: chatbot-backend
+  namespace: chatbot
+
+spec:
+  minAvailable: 2
+
+  selector:
+    matchLabels:
+      app: chatbot-backend

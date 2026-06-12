@@ -1,31 +1,34 @@
-import { leadRepository } from "../repositories/leadRepository";
+import { leadRepository, readLeadUserId } from "../repositories/leadRepository";
 import { chatRepository } from "../repositories/chatRepository";
 import { propertyRepository } from "../repositories/propertyRepository";
 import { AppError } from "../utils/appError";
 import { leadPayloadSchema } from "../validations/leadValidation";
 import prisma from "../lib/prisma";
 import { crmService } from "./crm/crm.service";
+import { chatLifecycleService } from "./chat/chatLifecycleService";
 import { z } from "zod";
 
 export const leadService = {
   async createLead(data: {
-    chatId: string;
+    chatId?: string;
     widgetKey: string;
     sessionId: string;
     fullName: string;
-    email: string;
-    phone: string;
+    userId?: string;
+    phone?: string;
   }): Promise<{
     id: string;
+    chatId: string;
     companyId: string;
     fullName: string;
-    email: string;
+    userId: string | null;
     phone: string | null;
     source: string;
     channel: string;
     status: string;
   }> {
     const parsed = leadPayloadSchema.safeParse(data);
+    console.log("Parsed lead payload:", parsed);
     if (!parsed.success) {
       throw new AppError(400, parsed.error.issues[0]?.message || "Invalid lead data", {
         errors: parsed.error.issues.map((issue) => ({
@@ -36,33 +39,43 @@ export const leadService = {
     }
 
     const normalizedData = parsed.data;
-    const chat = await chatRepository.findById(normalizedData.chatId);
-    if (!chat) {
-      throw new AppError(404, "Chat not found");
+    const property = await propertyRepository.findByWidgetKey(normalizedData.widgetKey);
+    if (!property) {
+      throw new AppError(404, "Property not found");
     }
 
-    const property = await propertyRepository.findByWidgetKey(normalizedData.widgetKey);
-    if (!property || property.id !== chat.propertyId) {
+    let chat = normalizedData.chatId
+      ? await chatRepository.findById(normalizedData.chatId)
+      : null;
+
+    if (!chat) {
+      chat = await chatLifecycleService.ensureWidgetChat({
+        widgetKey: normalizedData.widgetKey,
+        sessionId: normalizedData.sessionId,
+      });
+    }
+
+    if (property.id !== chat.propertyId) {
       throw new AppError(403, "Widget does not match this chat");
     }
     if (chat.sessionId !== normalizedData.sessionId) {
       throw new AppError(403, "Session does not match this chat");
     }
 
-    const existingLead = await leadRepository.findByChatId(normalizedData.chatId, chat.companyId);
+    const existingLead = await leadRepository.findByChatId(chat.id, chat.companyId);
     if (existingLead) {
       throw new AppError(400, "Lead already exists for this chat");
     }
 
-    // Update visitor with lead information (name, email, phone) for AI personalization
+    // Update visitor with lead information (name, userId, phone) for AI personalization
     let visitorId: string | null = null;
     if (chat.visitorId) {
       await prisma.visitor.update({
         where: { id: chat.visitorId },
         data: {
           name: normalizedData.fullName,
-          email: normalizedData.email,
-          phone: normalizedData.phone,
+          externalId: normalizedData.userId ?? null,
+          phone: normalizedData.phone ?? null,
         },
       });
       visitorId = chat.visitorId;
@@ -70,11 +83,11 @@ export const leadService = {
 
     const lead = await leadRepository.create({
       companyId: chat.companyId,
-      chatId: normalizedData.chatId,
+      chatId: chat.id,
       propertyId: chat.propertyId,
       fullName: normalizedData.fullName,
-      email: normalizedData.email,
-      phone: normalizedData.phone,
+      userId: normalizedData.userId ?? null,
+      phone: normalizedData.phone ?? null,
       status: "NEW",
       source: "WEBSITE",
       channel: "web_widget",
@@ -89,9 +102,10 @@ export const leadService = {
 
     return {
       id: lead.id,
+      chatId: chat.id,
       companyId: chat.companyId,
       fullName: lead.fullName,
-      email: lead.email,
+      userId: normalizedData.userId ?? null,
       phone: lead.phone,
       source: lead.source.toLowerCase(),
       channel: resolveLeadChannel(lead),
@@ -105,7 +119,7 @@ export const leadService = {
     fullName: string;
     email: string;
     phone?: string;
-  }): Promise<{ id: string; fullName: string; email: string; phone: string | null; source: string; channel: string; status: string }> {
+  }): Promise<{ id: string; fullName: string; email: string | null; phone: string | null; source: string; channel: string; status: string }> {
     const property = await propertyRepository.findById(params.propertyId, params.companyId);
     if (!property) {
       throw new AppError(404, "Property not found");
@@ -244,7 +258,7 @@ export const leadService = {
     };
   },
 
-  async getLeadByChatId(chatId: string, companyId: string): Promise<{ id: string; fullName: string; email: string; phone: string | null; source: string; channel: string; status: string } | null> {
+  async getLeadByChatId(chatId: string, companyId: string): Promise<{ id: string; fullName: string; email: string | null; userId: string | null; phone: string | null; source: string; channel: string; status: string } | null> {
     const lead = await leadRepository.findByChatId(chatId, companyId);
     if (!lead) {
       return null;
@@ -254,6 +268,7 @@ export const leadService = {
       id: lead.id,
       fullName: lead.fullName,
       email: lead.email,
+      userId: readLeadUserId(lead),
       phone: lead.phone,
       source: lead.source.toLowerCase(),
       channel: resolveLeadChannel(lead),
@@ -264,7 +279,8 @@ export const leadService = {
   async getLeadsByProperty(companyId: string, propertyId: string): Promise<Array<{
     id: string;
     fullName: string;
-    email: string;
+    email: string | null;
+    userId: string | null;
     phone: string | null;
     source: string;
     channel: string;
@@ -277,6 +293,7 @@ export const leadService = {
       id: lead.id,
       fullName: lead.fullName,
       email: lead.email,
+      userId: readLeadUserId(lead),
       phone: lead.phone,
       source: lead.source.toLowerCase(),
       channel: resolveLeadChannel(lead),
@@ -287,9 +304,9 @@ export const leadService = {
   },
 };
 
-const manualLeadImportRowSchema = leadPayloadSchema
-  .omit({ chatId: true, widgetKey: true, sessionId: true })
-  .extend({
+const manualLeadImportRowSchema = z.object({
+  fullName: leadPayloadSchema.shape.fullName,
+  email: z.string().trim().min(1, "Enter a valid email address.").max(100).email("Enter a valid email address."),
   phone: leadPayloadSchema.shape.phone.optional(),
   companyName: z.string().trim().max(100, "Company name must be 100 characters or fewer").optional(),
   notes: z.string().trim().max(1000, "Notes must be 1000 characters or fewer").optional(),

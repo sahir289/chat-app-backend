@@ -12,6 +12,22 @@ import { socketConfig } from "./socketConfig";
 import { expressConfig } from "./expressConfig";
 import { authConfig } from "./authConfig";
 import { kylasConfig } from "./kylasConfig";
+import { analyticsConfig } from "./analyticsConfig";
+import { getModuleLogger } from "../utils/logger";
+
+const log = getModuleLogger("config");
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+    if (value === undefined) {
+        return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+    return fallback;
+}
+
+const redisRequired = parseBoolean(process.env.REDIS_REQUIRED, true);
 
 export const config = {
     server: serverConfig,
@@ -27,6 +43,10 @@ export const config = {
     socket: socketConfig,
     auth: authConfig,
     kylas: kylasConfig,
+    analytics: analyticsConfig,
+    redis: {
+        required: redisRequired,
+    },
 } as const;
 
 export function validateConfig(): void {
@@ -85,9 +105,15 @@ export function validateConfig(): void {
             errors.push("Set APP_URL so the widget can use APP_URL/embed, or set WIDGET_EMBED_URL explicitly");
         }
 
-        if (!redisUrl) {
-            errors.push("REDIS_URL must be set in production");
-        } else {
+        if (kylasConfig.accountLeadSyncEnabled && !kylasConfig.apiKey.trim()) {
+            errors.push(
+                "KYLAS_API_KEY must be set in production when account lead sync is enabled (copy KYLAS_* vars from .env.example)"
+            );
+        }
+
+        if (!redisUrl && redisRequired) {
+            errors.push("REDIS_URL must be set in production when REDIS_REQUIRED=true");
+        } else if (redisUrl) {
             try {
                 const parsedRedisUrl = new URL(redisUrl);
 
@@ -109,7 +135,7 @@ export function validateConfig(): void {
     }
 
     if (!databaseConfig.url && serverConfig.nodeEnv !== "test") {
-        console.warn("[config] DATABASE_URL is not set");
+        log.warn("[config] DATABASE_URL is not set");
     }
 
     if (errors.length > 0) {
@@ -133,4 +159,5 @@ export {
     socketConfig,
     authConfig,
     kylasConfig,
+    analyticsConfig,
 };

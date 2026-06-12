@@ -3,13 +3,12 @@ import { faqService } from "../faqService";
 import { aiService } from "../aiService";
 import { aiCreditsService } from "../aiCreditsService";
 import { quickReplyService } from "../quickReplyService";
-import prisma from "../../lib/prisma";
 import { chatRepository } from "../../repositories/chatRepository";
 import { messageRepository } from "../../repositories/messageRepository";
-import { propertyRepository } from "../../repositories/propertyRepository";
 import type { MessageDTO, QuickReplySummary } from "../../types/chat";
 import { chatSocketService } from "./chatSocketService";
 import { NON_AI_FALLBACK_MESSAGE } from "../../constants/knowledge";
+import { conversationRoutingService } from "../conversationRoutingService";
 
 /** Persists bot message; caller broadcasts (HTTP/socket) or scheduler after sendAutoMessage. */
 async function createBotMessageRecord(params: {
@@ -138,21 +137,18 @@ export const chatAutoReplyService = {
             return null;
         }
 
-        const property = await propertyRepository.findById(propertyId, companyId);
-        const company = await prisma.company.findUnique({
-            where: { id: companyId },
-            select: { isPro: true },
+        const routingDecision = await conversationRoutingService.decideHandler({
+            propertyId,
+            companyId,
+            chatId,
         });
 
-        const isPro = company?.isPro ?? false;
-        const isAiEnabled =
-            property?.aiEnabled !== false &&
-            isPro &&
-            chat.aiEnabled !== false &&
-            !chat.agentId;
-        const hasAvailableAiCredits = isAiEnabled
-            ? await aiCreditsService.hasAvailableCredits(companyId)
-            : false;
+        if (routingDecision.handler === "agent") {
+            return null;
+        }
+
+        const isAiEnabled = routingDecision.handler === "ai";
+        const hasAvailableAiCredits = routingDecision.hasAiCredits;
 
         if (isAiEnabled && hasAvailableAiCredits) {
             await chatSocketService.emitAiTypingIndicator(

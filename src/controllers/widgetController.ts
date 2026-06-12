@@ -5,10 +5,11 @@ import { visitorEventRepository } from "../repositories/visitorEventRepository";
 import { visitorRepository } from "../repositories/visitorRepository";
 import { chatRepository } from "../repositories/chatRepository";
 import { attachmentRepository } from "../repositories/attachmentRepository";
-import { hasOnlineAgents, getIO, getPropertyRoom, isChatActivelyViewedByAgent, broadcastMessage } from "../socket/index";
+import { getIO, getPropertyRoom, isChatActivelyViewedByAgent, broadcastMessage } from "../socket/index";
 import { AppError } from "../utils/appError";
 import { getPresignedUrl } from "../services/s3Service";
 import prisma from "../lib/prisma";
+import { conversationRoutingService } from "../services/conversationRoutingService";
 import {
   resolveWidgetVisitorContext,
   buildChatVisitorInfo,
@@ -241,6 +242,16 @@ export async function postWidgetMessageHandler(
     visitorInfo,
   });
 
+  if (result.needsLeadInfo || !result.userMessage) {
+    return successResponse(res, {
+      data: {
+        ...result,
+        ...(result.needsLeadInfo ? { needsLeadInfo: true } : {}),
+      },
+      statusCode: 201,
+    });
+  }
+
   // Use result.chatId instead of chatId (which may be undefined in lazy creation mode)
   const effectiveChatId = result.chatId || chatId;
   if (!effectiveChatId) {
@@ -413,12 +424,19 @@ export async function getAgentAvailabilityHandler(
     throw new AppError(404, "Property not found");
   }
 
-  // Check if any agents/admins are online for this property
-  const available = await hasOnlineAgents(property.id);
+  const routingDecision = await conversationRoutingService.decideHandler({
+    propertyId: property.id,
+    companyId: property.companyId,
+    includeAiCredits: false,
+  });
 
   return successResponse(res, {
     data: {
-      available,
+      available: routingDecision.handler === "agent",
+      handler: routingDecision.handler,
+      reason: routingDecision.reason,
+      businessHoursOpen: routingDecision.businessHoursOpen,
+      aiEnabled: routingDecision.aiEnabled,
       propertyId: property.id,
     },
     statusCode: 200,
@@ -510,6 +528,7 @@ async function mapTranscriptMessageForWidget(
     id: msg.id,
     role,
     message: msg.text ?? "",
+    senderName: (msg as any).agent?.name || (msg as any).agent?.email || null,
     createdAt: msg.createdAt.toISOString(),
     editedAt: msg.editedAt?.toISOString(),
     attachments: attachments.length ? attachments : undefined,

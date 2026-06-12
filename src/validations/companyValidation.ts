@@ -86,6 +86,7 @@ export const toggleProStatusSchema = z.object({
     }),
     body: z.object({
         isPro: z.boolean({ required_error: "isPro is required" }),
+        billingCycle: z.enum(["TRIAL", "TEST_1_MIN", "MONTHLY", "QUARTERLY", "HALF_YEARLY", "YEARLY"]).optional(),
     }),
 });
 

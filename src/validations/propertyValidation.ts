@@ -100,3 +100,51 @@ export const updatePropertySchema = z.object({
       message: "At least one field is required",
     }),
 });
+
+export const propertyIdParamSchema = z.object({
+  params: z.object({
+    id: z.string().min(1, "id is required"),
+  }),
+});
+
+export const widgetKeyParamSchema = z.object({
+  params: z.object({
+    widgetKey: z.string().min(1, "widgetKey is required"),
+  }),
+});
+
+const timeSchema = z
+  .union([z.string().regex(/^\d{2}:\d{2}$/, "Time must be HH:mm"), z.null()])
+  .optional();
+
+export const updateBusinessHoursSchema = z.object({
+  params: z.object({
+    id: z.string().min(1, "id is required"),
+  }),
+  body: z.object({
+    enabled: z.boolean(),
+    timezone: z.string().min(1, "Timezone is required").max(80, "Timezone is too long"),
+    mondayEnabled: z.boolean(),
+    mondayStart: timeSchema,
+    mondayEnd: timeSchema,
+    tuesdayEnabled: z.boolean(),
+    tuesdayStart: timeSchema,
+    tuesdayEnd: timeSchema,
+    wednesdayEnabled: z.boolean(),
+    wednesdayStart: timeSchema,
+    wednesdayEnd: timeSchema,
+    thursdayEnabled: z.boolean(),
+    thursdayStart: timeSchema,
+    thursdayEnd: timeSchema,
+    fridayEnabled: z.boolean(),
+    fridayStart: timeSchema,
+    fridayEnd: timeSchema,
+    saturdayEnabled: z.boolean(),
+    saturdayStart: timeSchema,
+    saturdayEnd: timeSchema,
+    sundayEnabled: z.boolean(),
+    sundayStart: timeSchema,
+    sundayEnd: timeSchema,
+    holidays: z.unknown().optional(),
+  }),
+});

@@ -1,4 +1,7 @@
 import { DEFAULT_REDIS_STARTUP_TIMEOUT_MS } from "../utils/redis";
+import { getModuleLogger } from "../utils/logger";
+
+const log = getModuleLogger("config");
 
 function parsePositiveIntEnv(variableName: string, fallback: number): number {
   const rawValue = process.env[variableName];
@@ -8,7 +11,7 @@ function parsePositiveIntEnv(variableName: string, fallback: number): number {
 
   const parsedValue = Number(rawValue);
   if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
-    console.warn(
+    log.warn(
       `[config] Invalid ${variableName}="${rawValue}". Falling back to ${fallback}.`
     );
     return fallback;

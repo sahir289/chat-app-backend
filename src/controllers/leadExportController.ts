@@ -89,7 +89,10 @@ export async function exportLeadsHandler(
         const propertyFilter = await getAgentPropertyFilter(userId);
 
         // Build where clause
-        const where: Prisma.LeadWhereInput = { companyId };
+        const where: Prisma.LeadWhereInput = {
+            companyId,
+            property: { deletedAt: null },
+        };
         if (propertyId) {
             where.propertyId = typeof propertyId === "string" ? propertyId : Array.isArray(propertyId) ? propertyId[0] as string : String(propertyId);
         }
@@ -209,9 +212,10 @@ export async function exportLeadsHandler(
 
 function exportCSV(res: Response, leads: any[], filename: string) {
     // CSV header
-    const headers = ["Name", "Email", "Phone", "Source", "Channel", "Status", "Property", "Date Created"];
+    const headers = ["Name", "User ID", "Email", "Phone", "Source", "Channel", "Status", "Property", "Date Created"];
     const rows = leads.map((lead) => [
         lead.fullName || "",
+        lead.userId || "",
         lead.email || "",
         lead.phone || "",
         String(lead.source || "").toLowerCase(),
@@ -306,13 +310,14 @@ async function exportPDF(
     });
 
     const colGap = 10;
-    const fractions = [0.2, 0.34, 0.18, 0.28];
+    const fractions = [0.18, 0.22, 0.22, 0.18, 0.2];
     const widths = buildEqualGapColumnWidths(usableWidth, fractions, colGap);
     const columns: PdfColumnSpec[] = [
         { header: "Name", width: widths[0] },
-        { header: "Email", width: widths[1] },
-        { header: "Phone", width: widths[2], align: "right", headerAlign: "right" },
-        { header: "Created", width: widths[3], align: "right", headerAlign: "right" },
+        { header: "User ID", width: widths[1] },
+        { header: "Email", width: widths[2] },
+        { header: "Phone", width: widths[3], align: "right", headerAlign: "right" },
+        { header: "Created", width: widths[4], align: "right", headerAlign: "right" },
     ];
 
     const tableBodyTop = afterSummaryY;
@@ -321,12 +326,13 @@ async function exportPDF(
     const tableRows = leads.map((lead) => ({
         cells: [
             lead.fullName || "—",
+            lead.userId || "—",
             lead.email || "—",
             lead.phone || "—",
             formatLeadDateOnly(lead.createdAt),
         ],
         nameColumnIndex: 0,
-        rightAlignIndices: new Set([2, 3]),
+        rightAlignIndices: new Set([3, 4]),
     }));
 
     renderCrmLeadsDataTable(doc, {
@@ -366,6 +372,7 @@ async function exportExcel(res: Response, leads: any[], filename: string) {
     // Set column headers
     worksheet.columns = [
         { header: "Name", key: "name", width: 25 },
+        { header: "User ID", key: "userId", width: 20 },
         { header: "Email", key: "email", width: 30 },
         { header: "Phone", key: "phone", width: 20 },
         { header: "Property", key: "property", width: 25 },
@@ -384,6 +391,7 @@ async function exportExcel(res: Response, leads: any[], filename: string) {
     leads.forEach((lead) => {
         worksheet.addRow({
             name: lead.fullName || "",
+            userId: lead.userId || "",
             email: lead.email || "",
             phone: lead.phone || "",
             property: lead.property?.name || "",

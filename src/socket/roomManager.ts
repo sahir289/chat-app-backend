@@ -540,6 +540,44 @@ export async function hasOnlineAgents(propertyId: string): Promise<boolean> {
     return !!(agentSockets && agentSockets.size > 0);
 }
 
+export async function getOnlineAgentIdsForProperty(propertyId: string): Promise<string[]> {
+    let socketIds: string[] = [];
+    const redisAvailable = await isRedisAvailable();
+
+    if (redisAvailable) {
+        try {
+            const redis = getRedisClient();
+            socketIds = await redis.smembers(`agents:${propertyId}`);
+        } catch (error) {
+            log.warn("Redis error in getOnlineAgentIdsForProperty, falling back to memory:", error);
+        }
+    }
+
+    if (socketIds.length === 0) {
+        socketIds = Array.from(fallbackOnlineAgents.get(propertyId) ?? []);
+    }
+
+    if (socketIds.length === 0) {
+        return [];
+    }
+
+    const agentIds = new Set<string>();
+    await Promise.all(
+        socketIds.map(async (socketId) => {
+            const roomInfo = await getSocketRoomData(socketId);
+            if (
+                roomInfo?.propertyId === propertyId &&
+                (roomInfo.role === "agent" || roomInfo.role === "dashboard") &&
+                roomInfo.agentId
+            ) {
+                agentIds.add(roomInfo.agentId);
+            }
+        })
+    );
+
+    return Array.from(agentIds);
+}
+
 export async function getOnlineChatIds(): Promise<string[]> {
     const redisAvailable = await isRedisAvailable();
 

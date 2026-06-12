@@ -141,12 +141,12 @@ export async function toggleProStatusHandler(
   res: Response
 ) {
   const { id } = req.params;
-  const { isPro } = req.body;
+  const { isPro, billingCycle } = req.body;
   const userId = (req as AuthenticatedRequest).user?.id;
 
   const companyBefore = await companyService.getById(id);
 
-  const company = await companyService.toggleProStatus(id, isPro, userId);
+  const company = await companyService.toggleProStatus(id, isPro, userId, billingCycle);
 
   if (userId) {
     try {

@@ -13,6 +13,6 @@ data:
   TRUST_PROXY: "true"
   LOG_LEVEL: "info"
   # Public URLs and CORS origins are environment-specific, not secret.
-  APP_URL: "https://app.yourplatform.com"
-  CORS_ORIGINS: "https://app.yourplatform.com,https://www.yourplatform.com"
-  WIDGET_BACKEND_URL: "https://api.yourplatform.com"
+  APP_URL: "https://api.queriesresolve.com"
+  CORS_ORIGINS: "https://queriesresolve.com,https://www.queriesresolve.com"
+  WIDGET_BACKEND_URL: "https://api.queriesresolve.com"

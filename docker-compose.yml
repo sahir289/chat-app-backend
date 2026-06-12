@@ -1,55 +1,73 @@
 # docker-compose runs your whole stack locally with ONE command:
 #   docker compose up --build
-# It mirrors production (app + Postgres + Redis) so "works on my machine" also
-# means "works in the cluster". This file is for LOCAL DEV ONLY, never prod.
+#
+# This file is for LOCAL DEVELOPMENT ONLY.
+#
+# NEVER use this file in production.
+#
+# Production stack:
+#   AWS EKS
+#   AWS ElastiCache Redis
+#   AWS RDS PostgreSQL
+#   AWS Secrets Manager
 
 services:
-  # ----------------------------------------------------------------------
-  # Your Node/Socket.IO backend, built from the Dockerfile in this repo.
-  # ----------------------------------------------------------------------
   app:
     build:
       context: .
       dockerfile: Dockerfile
     # Restart unless you explicitly stop it (survives crashes during dev).
     restart: unless-stopped
+
+    # host:container — reach the API at http://localhost:4000
     ports:
-      # host:container — reach the API at http://localhost:4000
       - "4000:4000"
+
     environment:
       NODE_ENV: development
       PORT: "4000"
       # Service names ("postgres", "redis") resolve via Docker's internal DNS,
       # so the app talks to siblings by name, not localhost.
+      # Internal Docker DNS
       DATABASE_URL: "postgresql://postgres:12345@postgres:5432/chatbot?schema=public"
+
       REDIS_URL: "redis://redis:6379"
+
       REDIS_ALLOW_INSECURE: "true"
       REDIS_ALLOW_NOAUTH: "true"
+
     env_file:
-      # Pull the rest of your config (JWT secrets, OpenAI key, etc.) from .env.
+    # Pull the rest of your config (JWT secrets, OpenAI key, etc.) from .env.
       - .env
+
     depends_on:
-      # Don't start the app until DB and cache report HEALTHY (see healthchecks).
+    # Don't start the app until DB and cache report HEALTHY (see healthchecks).
       postgres:
         condition: service_healthy
+
       redis:
         condition: service_healthy
 
   # ----------------------------------------------------------------------
-  # PostgreSQL with pgvector (your schema uses vector embeddings).
+  # PostgreSQL with pgvector (schema uses vector embeddings).
   # ----------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
+
     restart: unless-stopped
+
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: "12345"
       POSTGRES_DB: chatbot
+
     ports:
       - "5432:5432"
+
+    # Named volume = data survives "docker compose down" (but not "down -v").
     volumes:
-      # Named volume = data survives "docker compose down" (but not "down -v").
       - pgdata:/var/lib/postgresql/data
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d chatbot"]
       interval: 5s
@@ -61,11 +79,16 @@ services:
   # ----------------------------------------------------------------------
   redis:
     image: redis:7-alpine
+
     restart: unless-stopped
+
     ports:
       - "6379:6379"
+
     volumes:
+      # Named volume = data survives "docker compose down" (but not "down -v").
       - redisdata:/data
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

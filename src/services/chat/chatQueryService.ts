@@ -1,23 +1,57 @@
 import { chatRepository } from "../../repositories/chatRepository";
+import { leadRepository, type LeadSessionSummary } from "../../repositories/leadRepository";
 import { messageRepository } from "../../repositories/messageRepository";
 import { visitorEventRepository } from "../../repositories/visitorEventRepository";
 import { AppError } from "../../utils/appError";
 import { isVisitorOnline, getIO } from "../../socket/index";
-import { getPresignedUrl } from "../s3Service";
+import { normalizeMessagesLimit } from "../../constants/messagePagination";
+import { mapMessageToDto } from "./messageDtoMapper";
 import type { DashboardChatItemDTO, MessageDTO, ChatDTO } from "../../types/chat";
+import { getLeadVisitorName, getVisitorFirstName } from "../../utils/leadVisitorName";
+
+export type CursorMessagesResult = {
+    messages: MessageDTO[];
+    nextCursor: string | null;
+    hasMore: boolean;
+    limit: number;
+};
+
+function resolveVisitorFullName(input: {
+    lead?: { fullName?: string | null } | null;
+    visitor?: { name?: string | null } | null;
+}): string | null {
+    return input.lead?.fullName?.trim() || input.visitor?.name?.trim() || null;
+}
+
+function resolveVisitorFirstName(input: {
+    lead?: { fullName?: string | null } | null;
+    visitor?: { name?: string | null } | null;
+}): string | null {
+    return getLeadVisitorName(input.lead) ?? getVisitorFirstName(input.visitor?.name);
+}
+
+function leadSessionKey(propertyId: string, sessionId: string): string {
+    return `${propertyId}:${sessionId}`;
+}
+
+function buildLatestLeadBySession(leads: LeadSessionSummary[]): Map<string, LeadSessionSummary> {
+    const map = new Map<string, LeadSessionSummary>();
+    for (const lead of leads) {
+        if (!lead.chat) continue;
+        const key = leadSessionKey(lead.chat.propertyId, lead.chat.sessionId);
+        if (!map.has(key)) {
+            map.set(key, lead);
+        }
+    }
+    return map;
+}
+
 export const chatQueryService = {
-    async getMessages(
+    async getMessagesCursor(
         chatId: string,
         companyId?: string,
-        page: number = 1,
-        limit: number = 50
-    ): Promise<{
-        chat: { id: string; propertyId: string; sessionId: string; status: string; createdAt: Date };
-        messages: MessageDTO[];
-        total: number;
-        page: number;
-        limit: number;
-    }> {
+        options: { limit?: number | string; cursor?: string } = {}
+    ): Promise<CursorMessagesResult> {
         const chat = await chatRepository.findById(chatId, companyId);
         if (!chat) {
             throw new AppError(404, "Chat not found");
@@ -27,114 +61,61 @@ export const chatQueryService = {
             throw new AppError(403, "Forbidden: Chat does not belong to your company");
         }
 
-        const [messages, total] = await Promise.all([
-            messageRepository.listByChat(chatId, page, limit),
-            messageRepository.countByChat(chatId),
-        ]);
+        const limit = normalizeMessagesLimit(options.limit);
+        const cursor = typeof options.cursor === "string" ? options.cursor.trim() : "";
+        const rawMessages = await messageRepository.listByChatCursor(
+            chatId,
+            limit,
+            cursor || undefined
+        );
 
+        const hasMore = rawMessages.length > limit;
+        const pageMessages = hasMore ? rawMessages.slice(0, limit) : rawMessages;
+        const messagesAsc = [...pageMessages].reverse();
         const effectiveCompanyId = companyId || chat.companyId;
 
         return {
-            chat: {
-                id: chat.id,
-                propertyId: chat.propertyId,
-                sessionId: chat.sessionId,
-                status: chat.status,
-                createdAt: chat.createdAt,
-            },
             messages: await Promise.all(
-                messages.map(async (m) => {
-                    // Parse metadata if it exists
-                    let parsedMetadata: any = null;
-                    if (m.metadata) {
-                        if (typeof m.metadata === 'string') {
-                            try {
-                                parsedMetadata = JSON.parse(m.metadata);
-                            } catch {
-                                parsedMetadata = null;
-                            }
-                        } else {
-                            parsedMetadata = m.metadata;
-                        }
-                    }
-
-                    // Map message buttons
-                    const buttons = ((m as any).messageButtons || []).map((btn: any) => ({
-                        id: btn.id,
-                        label: btn.label,
-                        value: btn.value,
-                        type: btn.type,
-                        url: btn.url,
-                        payload: btn.payload,
-                        order: btn.order,
-                    }));
-
-                    return {
-                        id: m.id,
-                        chatId: m.chatId,
-                        senderType: m.senderType,
-                        text: m.text || "",
-                        createdAt: m.createdAt,
-                        metadata: parsedMetadata,
-                        buttons: buttons.length > 0 ? buttons : undefined,
-                        attachments: await Promise.all(
-                            ((m as any).attachments || []).map(async (att: any) => {
-                                let fileUrl: string | null = null;
-                                let thumbnailUrl: string | null = null;
-
-                                if (att.fileUrl && effectiveCompanyId) {
-                                    try {
-                                        fileUrl = await getPresignedUrl(att.fileUrl, effectiveCompanyId, 3600);
-                                    } catch (error) {
-                                    }
-                                }
-
-                                if (att.thumbnailUrl && effectiveCompanyId) {
-                                    try {
-                                        thumbnailUrl = await getPresignedUrl(att.thumbnailUrl, effectiveCompanyId, 3600);
-                                    } catch (error) {
-                                    }
-                                }
-
-                                return {
-                                    id: att.id,
-                                    fileName: att.fileName,
-                                    fileType: att.fileType,
-                                    fileSize: att.fileSize,
-                                    fileUrl,
-                                    thumbnailUrl,
-                                    createdAt: att.createdAt,
-                                };
-                            })
-                        ),
-                    };
-                })
+                messagesAsc.map((message) => mapMessageToDto(message, effectiveCompanyId))
             ),
-            total,
-            page,
+            nextCursor: hasMore && messagesAsc.length > 0 ? messagesAsc[0].id : null,
+            hasMore,
             limit,
         };
     },
 
     async getDashboardChats(companyId: string, propertyId: string): Promise<DashboardChatItemDTO[]> {
         const chats = await chatRepository.listByPropertyWithLastMessage(companyId, propertyId);
+        const latestLeadBySession = buildLatestLeadBySession(
+            await leadRepository.findLatestByChatSessions({
+                companyId,
+                propertyIds: [propertyId],
+                sessionIds: chats.map((c) => c.sessionId),
+            })
+        );
 
-        return chats.map((c) => ({
-            id: c.id,
-            sessionId: c.sessionId,
-            status: c.status,
-            createdAt: c.createdAt,
-            lastMessage:
-                c.messages && c.messages.length > 0 && c.messages[0]
-                    ? {
-                        id: c.messages[0].id,
-                        chatId: c.messages[0].chatId,
-                        senderType: c.messages[0].senderType,
-                        text: c.messages[0].text || "",
-                        createdAt: c.messages[0].createdAt,
-                    }
-                    : null,
-        }));
+        return chats.map((c) => {
+            const lead = c.leads?.[0] ?? latestLeadBySession.get(leadSessionKey(c.propertyId, c.sessionId)) ?? null;
+
+            return {
+                id: c.id,
+                sessionId: c.sessionId,
+                visitorName: resolveVisitorFirstName({ lead, visitor: c.visitor }),
+                visitorFullName: resolveVisitorFullName({ lead, visitor: c.visitor }),
+                status: c.status,
+                createdAt: c.createdAt,
+                lastMessage:
+                    c.messages && c.messages.length > 0 && c.messages[0]
+                        ? {
+                            id: c.messages[0].id,
+                            chatId: c.messages[0].chatId,
+                            senderType: c.messages[0].senderType,
+                            text: c.messages[0].text || "",
+                            createdAt: c.messages[0].createdAt,
+                        }
+                        : null,
+            };
+        });
     },
 
     async getInbox(companyId: string, propertyId?: string, currentUserId?: string): Promise<Array<{
@@ -144,6 +125,9 @@ export const chatQueryService = {
         propertyId: string;
         agentId: string | null;
         agent: { id: string; name: string | null; email: string } | null;
+        visitorName: string | null;
+        visitorFullName: string | null;
+        lead: { id: string; fullName: string } | null;
         lastMessage: MessageDTO | null;
         hasUnread: boolean;
         unreadCount: number;
@@ -152,6 +136,13 @@ export const chatQueryService = {
         createdAt: Date;
     }>> {
         const chats = await chatRepository.listHistory(companyId, propertyId, 200, 0);
+        const latestLeadBySession = buildLatestLeadBySession(
+            await leadRepository.findLatestByChatSessions({
+                companyId,
+                propertyIds: propertyId ? [propertyId] : undefined,
+                sessionIds: chats.map((c) => c.sessionId),
+            })
+        );
 
         const onlineChatIds = new Set<string>();
         const io = getIO();
@@ -184,9 +175,14 @@ export const chatQueryService = {
                 }
                 : null;
 
+            const lead = c.leads?.[0] ?? latestLeadBySession.get(leadSessionKey(c.propertyId, c.sessionId)) ?? null;
+
             return {
                 id: c.id,
                 sessionId: c.sessionId,
+                visitorName: resolveVisitorFirstName({ lead, visitor: c.visitor }),
+                visitorFullName: resolveVisitorFullName({ lead, visitor: c.visitor }),
+                lead: c.leads?.[0] ?? null,
                 status: c.status,
                 propertyId: c.propertyId,
                 agentId: c.agentId ?? null,
@@ -281,22 +277,35 @@ export const chatQueryService = {
         offset: number = 0
     ): Promise<DashboardChatItemDTO[]> {
         const chats = await chatRepository.listHistory(companyId, propertyId, limit, offset);
+        const latestLeadBySession = buildLatestLeadBySession(
+            await leadRepository.findLatestByChatSessions({
+                companyId,
+                propertyIds: propertyId ? [propertyId] : undefined,
+                sessionIds: chats.map((c) => c.sessionId),
+            })
+        );
 
-        return chats.map((c) => ({
-            id: c.id,
-            sessionId: c.sessionId,
-            status: c.status,
-            createdAt: c.createdAt,
-            lastMessage:
-                c.messages && c.messages.length > 0 && c.messages[0]
-                    ? {
-                        id: c.messages[0].id,
-                        chatId: c.messages[0].chatId,
-                        senderType: c.messages[0].senderType,
-                        text: c.messages[0].text || "",
-                        createdAt: c.messages[0].createdAt,
-                    }
-                    : null,
-        }));
+        return chats.map((c) => {
+            const lead = c.leads?.[0] ?? latestLeadBySession.get(leadSessionKey(c.propertyId, c.sessionId)) ?? null;
+
+            return {
+                id: c.id,
+                sessionId: c.sessionId,
+                visitorName: resolveVisitorFirstName({ lead, visitor: c.visitor }),
+                visitorFullName: resolveVisitorFullName({ lead, visitor: c.visitor }),
+                status: c.status,
+                createdAt: c.createdAt,
+                lastMessage:
+                    c.messages && c.messages.length > 0 && c.messages[0]
+                        ? {
+                            id: c.messages[0].id,
+                            chatId: c.messages[0].chatId,
+                            senderType: c.messages[0].senderType,
+                            text: c.messages[0].text || "",
+                            createdAt: c.messages[0].createdAt,
+                        }
+                        : null,
+            };
+        });
     },
 };

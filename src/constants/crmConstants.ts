@@ -7,6 +7,7 @@ export type CrmChatbotFieldOption = { key: string; label: string };
 /** Shared default chatbot → CRM field map (webhook and non-HubSpot providers). */
 export const CRM_BASE_DEFAULT_MAPPINGS: Record<string, string> = {
   "visitor.name": "firstname",
+  "visitor.userId": "user_id",
   "visitor.email": "email",
   "visitor.phone": "phone",
   "lead.companyName": "company",
@@ -61,6 +62,7 @@ export const CRM_PROVIDER_FIELDS: Record<CrmProvider, CrmTargetFieldOption[]> = 
 export const CRM_CHATBOT_FIELDS: CrmChatbotFieldOption[] = [
   { key: "visitor.name", label: "Lead name" },
   { key: "visitor.email", label: "Email" },
+  { key: "visitor.userId", label: "User ID" },
   { key: "visitor.phone", label: "Phone" },
   { key: "lead.companyName", label: "Company name" },
   { key: "lead.id", label: "Lead ID" },

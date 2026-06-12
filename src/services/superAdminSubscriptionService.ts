@@ -59,7 +59,7 @@ export const superAdminSubscriptionService = {
         };
     },
 
-    async enableProAccess(companyId: string, userId: string, reason?: string) {
+    async enableProAccess(companyId: string, userId: string, reason?: string, billingCycle?: string | null) {
         // Get company info before updating
         const companyBefore = await companyRepository.findById(companyId);
         if (!companyBefore) {
@@ -72,7 +72,7 @@ export const superAdminSubscriptionService = {
         // Update company to PRO
         const company = await companyRepository.update(companyId, { isPro: true });
 
-        await subscriptionService.syncSubscriptionForCompany(companyId, true);
+        await subscriptionService.syncSubscriptionForCompany(companyId, true, billingCycle);
 
         // Enable all modules for PRO companies
         try {
@@ -97,25 +97,26 @@ export const superAdminSubscriptionService = {
     },
 
     async disableProAccess(companyId: string, userId: string, reason?: string) {
-        const company = await companyRepository.update(companyId, { isPro: false });
-
-        await subscriptionService.syncSubscriptionForCompany(companyId, false);
-
-        // Set modules for FREE plan: Enable FREE modules, disable PRO modules
-        try {
-            await moduleControlService.setFreePlanModules(
-                companyId,
-                userId,
-                reason || "PRO access disabled by Super Admin - set to FREE plan modules"
-            );
-        } catch (error) {
-            // Log error but don't fail the request if module update fails
+        const companyBefore = await companyRepository.findById(companyId);
+        if (!companyBefore) {
+            throw new AppError(404, "Company not found");
         }
 
-        return company;
+        await subscriptionService.downgradeCompanyToFreePlan(companyId, {
+            actorId: userId,
+            reason: reason || "PRO access disabled by Super Admin - set to FREE plan modules",
+        });
+
+        return companyRepository.findById(companyId);
     },
 
-    async changePlan(subscriptionId: string, planTier: PlanTier, userId: string, reason?: string) {
+    async changePlan(
+        subscriptionId: string,
+        planTier: PlanTier,
+        userId: string,
+        reason?: string,
+        billingCycle?: string | null
+    ) {
         // Find subscription
         const subscription = await subscriptionRepository.findById(subscriptionId);
         if (!subscription) {
@@ -127,14 +128,19 @@ export const superAdminSubscriptionService = {
             subscriptionId,
             planTier,
             userId,
-            reason
+            reason,
+            billingCycle
         );
 
         const isPro = planTier === "PRO";
         await companyRepository.update(subscription.companyId, {
             isPro,
         });
-        await subscriptionService.syncSubscriptionForCompany(subscription.companyId, isPro);
+        await subscriptionService.syncSubscriptionForCompany(
+            subscription.companyId,
+            isPro,
+            isPro ? billingCycle ?? updated.billingCycle : null
+        );
         await aiCreditsService.syncCompanyPlanCredits(subscription.companyId);
 
         // Update modules based on plan
@@ -176,6 +182,13 @@ export const superAdminSubscriptionService = {
             userId,
             reason
         );
+
+        if (status === "CANCELED" || status === "EXPIRED") {
+            await subscriptionService.ensureCompanyPlanMatchesSubscription(subscription.companyId, {
+                actorId: userId,
+                reason: reason || `Subscription ${status.toLowerCase()} - switched to Free plan`,
+            });
+        }
 
         return updated;
     },

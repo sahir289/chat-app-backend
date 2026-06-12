@@ -7,8 +7,8 @@ export function buildReopenChatData(): { status: "ACTIVE"; closedAt: null } {
     };
 }
 
-export function shouldRequestLeadInfo(leadExists: boolean, visitorMessageCount: number): boolean {
-    return !leadExists && visitorMessageCount >= 2 && visitorMessageCount <= 3;
+export function shouldRequestLeadInfo(leadExists: boolean): boolean {
+    return !leadExists;
 }
 
 export function appendClosingMessageIfNeeded(replyText: string, hasClosingIntent: boolean): string {

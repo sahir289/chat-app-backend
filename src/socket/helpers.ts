@@ -5,6 +5,7 @@ import { SOCKET_EVENTS } from "./events";
 import type { MessagePayload, SocketError, ChatInfo, BroadcastMessageOptions } from "./types";
 import { getModuleLogger } from "../utils/logger";
 import { getLocationFromIP } from "../utils/ipLocation";
+import { SenderType } from "@prisma/client";
 
 const log = getModuleLogger("socket");
 
@@ -49,6 +50,8 @@ export function transformMessageToPayload(
         createdAt: message.createdAt.toISOString(),
         sessionId,
         agentId,
+        senderName: message.senderName ?? null,
+        agentName: message.senderType === SenderType.AGENT ? message.senderName ?? null : null,
         quickReplies: message.quickReplies,
         clientMessageId: message.clientMessageId ?? undefined,
         replyToClientMessageId: message.replyToClientMessageId ?? undefined,

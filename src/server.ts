@@ -48,8 +48,9 @@ app.use((req, res, next) => {
   const isWidgetSettingsRoute = /^\/api\/properties\/widget\/[^/]+\/settings$/.test(normalizedPath);
   const isWidgetVerifyRoute = normalizedPath === "/api/widget/verify";
   const isAttachmentsVisitorRoute = normalizedPath === "/api/attachments/visitor";
+  const isAnalyticsTrackRoute = normalizedPath === "/api/analytics/track";
 
-  if (isWidgetSettingsRoute || isWidgetVerifyRoute || isAttachmentsVisitorRoute) {
+  if (isWidgetSettingsRoute || isWidgetVerifyRoute || isAttachmentsVisitorRoute || isAnalyticsTrackRoute) {
     return widgetPublicCors(req, res, next);
   }
 

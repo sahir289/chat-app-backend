@@ -303,6 +303,7 @@ export const analyticsService = {
       where: {
         companyId,
         ...(propertyId ? { propertyId } : {}),
+        property: { deletedAt: null },
         ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
       },
     });
@@ -388,6 +389,7 @@ export const analyticsService = {
       where: {
         companyId,
         ...(propertyId ? { propertyId } : {}),
+        property: { deletedAt: null },
         ...(startDate || endDate
           ? {
             createdAt: {

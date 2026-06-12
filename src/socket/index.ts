@@ -31,6 +31,8 @@ let adapterRetryTimer: NodeJS.Timeout | null = null;
 type SocketAuthUser = {
     id: string;
     companyId: string | null;
+    name: string | null;
+    email: string | null;
     role: string;
     isOwner: boolean;
     isSuperAdmin: boolean;
@@ -149,6 +151,8 @@ export function initSocket(server: HTTPServer): IOServer {
             socket.data.authUser = {
                 id: dbUser.id,
                 companyId: dbUser.companyId ?? null,
+                name: dbUser.name ?? null,
+                email: dbUser.email ?? null,
                 role: String(dbUser.role),
                 isOwner: Boolean(dbUser.isOwner),
                 isSuperAdmin,
@@ -318,7 +322,13 @@ export async function closeSocketAdapter(): Promise<void> {
     await closeRedisSocketAdapter();
 }
 
-export { isVisitorOnline, hasOnlineAgents, getOnlineChatIds, isChatActivelyViewedByAgent } from "./roomManager";
+export {
+    isVisitorOnline,
+    hasOnlineAgents,
+    getOnlineAgentIdsForProperty,
+    getOnlineChatIds,
+    isChatActivelyViewedByAgent,
+} from "./roomManager";
 export { SOCKET_EVENTS } from "./events";
 export { getChatRoom, getPropertyRoom, broadcastMessage } from "./helpers";
 export type { JoinPayload, MessagePayload, SocketRoom } from "./types";

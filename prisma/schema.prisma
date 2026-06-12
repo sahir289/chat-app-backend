@@ -457,7 +457,8 @@ model Lead {
   propertyId   String
   visitorId    String?
   fullName     String
-  email        String
+  email        String?
+  userId       String?
   phone        String?
   companyName  String?
   notes        String?
@@ -480,6 +481,7 @@ model Lead {
   @@index([propertyId])
   @@index([chatId])
   @@index([email])
+  @@index([userId])
   @@index([status])
   @@index([createdAt])
 }
@@ -706,7 +708,7 @@ model Subscription {
   changes               SubscriptionChange[]
   usageRecords          UsageRecord[]
 
-  @@index([companyId])
+  @@unique([companyId])
   @@index([status])
   @@index([planTier])
 }
@@ -922,6 +924,7 @@ model DepartmentMember {
 model BusinessHours {
   id               String   @id @default(cuid())
   propertyId       String   @unique
+  enabled          Boolean  @default(false)
   timezone         String   @default("UTC")
   mondayEnabled    Boolean  @default(true)
   mondayStart      String?  @default("09:00")
@@ -1524,7 +1527,12 @@ enum PlanTier {
 }
 
 enum BillingCycle {
+  TRIAL
+  TEST_1_MIN
   MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
 }
 
 enum SubscriptionStatus {
@@ -1738,4 +1746,122 @@ enum AiCreditsAddonRequestStatus {
   PENDING
   FULFILLED
   REJECTED
+}
+
+enum WebsiteAnalyticsDeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+  BOT
+  UNKNOWN
+}
+
+model WebsiteAnalyticsVisitor {
+  id            String                     @id @default(cuid())
+  siteId        String                     @default("mitra-varta") @map("site_id")
+  visitorKey    String                     @map("visitor_key")
+  country       String?
+  region        String?
+  city          String?
+  timezone      String?
+  deviceType    WebsiteAnalyticsDeviceType @default(UNKNOWN) @map("device_type")
+  browser       String?
+  os            String?
+  userAgent     String?                    @map("user_agent")
+  firstPage     String?                    @map("first_page")
+  landingPage   String?                    @map("landing_page")
+  referrer      String?
+  utmSource     String?                    @map("utm_source")
+  utmMedium     String?                    @map("utm_medium")
+  utmCampaign   String?                    @map("utm_campaign")
+  utmTerm       String?                    @map("utm_term")
+  utmContent    String?                    @map("utm_content")
+  visitCount    Int                        @default(0) @map("visit_count")
+  pageViewCount Int                        @default(0) @map("page_view_count")
+  isBot         Boolean                    @default(false) @map("is_bot")
+  firstSeenAt   DateTime                   @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime                   @default(now()) @map("last_seen_at")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  ipHistory WebsiteAnalyticsVisitorIpHistory[]
+  sessions  WebsiteAnalyticsSession[]
+  pageViews WebsiteAnalyticsPageView[]
+
+  @@unique([siteId, visitorKey])
+  @@index([siteId])
+  @@index([lastSeenAt])
+  @@index([siteId, lastSeenAt])
+  @@index([isBot])
+  @@index([city])
+  @@index([country])
+  @@index([utmSource])
+  @@index([deviceType])
+  @@map("website_analytics_visitors")
+}
+
+model WebsiteAnalyticsVisitorIpHistory {
+  id          String   @id @default(cuid())
+  visitorId   String   @map("visitor_id")
+  ipHash      String   @map("ip_hash")
+  encryptedIp String?  @map("encrypted_ip")
+  maskedIp    String?  @map("masked_ip")
+  userAgent   String?  @map("user_agent")
+  country     String?
+  city        String?
+  seenCount   Int      @default(1) @map("seen_count")
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+
+  visitor WebsiteAnalyticsVisitor @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+
+  @@unique([visitorId, ipHash])
+  @@index([visitorId])
+  @@index([ipHash])
+  @@index([maskedIp])
+  @@index([country])
+  @@index([city])
+  @@map("website_analytics_visitor_ip_history")
+}
+
+model WebsiteAnalyticsSession {
+  id         String                     @id @default(cuid())
+  sessionKey String                     @unique @map("session_key")
+  visitorId  String                     @map("visitor_id")
+  startedAt  DateTime                   @default(now()) @map("started_at")
+  lastSeenAt DateTime                   @default(now()) @map("last_seen_at")
+  isBot      Boolean                    @default(false) @map("is_bot")
+  deviceType WebsiteAnalyticsDeviceType @default(UNKNOWN) @map("device_type")
+  userAgent  String?                    @map("user_agent")
+
+  visitor   WebsiteAnalyticsVisitor    @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  pageViews WebsiteAnalyticsPageView[]
+
+  @@index([visitorId])
+  @@index([startedAt])
+  @@index([lastSeenAt])
+  @@index([isBot])
+  @@index([deviceType])
+  @@map("website_analytics_sessions")
+}
+
+model WebsiteAnalyticsPageView {
+  id        String   @id @default(cuid())
+  visitorId String   @map("visitor_id")
+  sessionId String   @map("session_id")
+  path      String
+  title     String?
+  referrer  String?
+  userAgent String?  @map("user_agent")
+  viewedAt  DateTime @default(now()) @map("viewed_at")
+
+  visitor WebsiteAnalyticsVisitor @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  session WebsiteAnalyticsSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([visitorId])
+  @@index([sessionId])
+  @@index([path])
+  @@index([viewedAt])
+  @@index([sessionId, path, viewedAt])
+  @@map("website_analytics_page_views")
 }

@@ -32,6 +32,44 @@ function pruneFallbackStore(): void {
     }
 }
 
+export async function peekRateLimit(
+    key: string,
+    windowMs: number
+): Promise<{ count: number; resetTime: number }> {
+    const now = Date.now();
+    const redisAvailable = await isRedisAvailable();
+    if (redisAvailable) {
+        try {
+            const redis = getRedisClient();
+            const { counterKey, resetKey } = getRateLimitKeys(key);
+            const countStr = await redis.get(counterKey);
+            const count = countStr ? parseInt(countStr, 10) : 0;
+
+            if (count === 0) {
+                return { count: 0, resetTime: now + windowMs };
+            }
+
+            const resetTimeStr = await redis.get(resetKey);
+            if (resetTimeStr) {
+                return { count, resetTime: parseInt(resetTimeStr, 10) };
+            }
+
+            const ttlMs = await redis.pttl(counterKey);
+            const remainingMs = ttlMs > 0 ? ttlMs : windowMs;
+            return { count, resetTime: now + remainingMs };
+        } catch (_error) {
+            // Fall back to in-memory rate limiting if Redis is unavailable.
+        }
+    }
+
+    const existing = fallbackStore.get(key);
+    if (!existing || existing.resetTime <= now) {
+        return { count: 0, resetTime: now + windowMs };
+    }
+
+    return { count: existing.count, resetTime: existing.resetTime };
+}
+
 export async function consumeRateLimit(
     key: string,
     windowMs: number

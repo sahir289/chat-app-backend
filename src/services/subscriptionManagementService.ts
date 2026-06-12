@@ -1,16 +1,23 @@
 import { subscriptionRepository } from "../repositories/subscriptionRepository";
 import { AppError } from "../utils/appError";
 import {
-  BillingCycle,
   PlanTier,
+  SubscriptionStatus,
+  type BillingCycle,
   type SubscriptionAction,
-  type SubscriptionStatus,
 } from "@prisma/client";
 import prisma from "../lib/prisma";
 import {
   buildActiveAnniversaryBillingPeriod,
   buildInitialAnniversaryBillingPeriod,
+  isFixedDurationBillingCycle,
 } from "../utils/billingPeriod";
+import {
+  DEFAULT_BILLING_CYCLE,
+  getDefaultSubscriptionStatus,
+  normalizeBillingCycle,
+  type SubscriptionBillingCycle,
+} from "./subscriptionService";
 export const subscriptionManagementService = {
   async activateSubscription(
     subscriptionId: string,
@@ -24,7 +31,7 @@ export const subscriptionManagementService = {
 
     const oldStatus = subscription.status;
     const updated = await subscriptionRepository.update(subscriptionId, {
-      status: "ACTIVE",
+      status: SubscriptionStatus.ACTIVE,
     });
 
     await subscriptionRepository.createSubscriptionChange({
@@ -32,7 +39,7 @@ export const subscriptionManagementService = {
       changedBySuperAdminId: superAdminId,
       action: "ACTIVATE",
       oldStatus,
-      newStatus: "ACTIVE",
+      newStatus: SubscriptionStatus.ACTIVE,
       reason,
     });
 
@@ -40,7 +47,7 @@ export const subscriptionManagementService = {
       action: "ACTIVATE",
       subscriptionId,
       oldStatus,
-      newStatus: "ACTIVE",
+      newStatus: SubscriptionStatus.ACTIVE,
       reason,
     });
 
@@ -59,7 +66,7 @@ export const subscriptionManagementService = {
 
     const oldStatus = subscription.status;
     const updated = await subscriptionRepository.update(subscriptionId, {
-      status: "SUSPENDED",
+      status: SubscriptionStatus.SUSPENDED,
     });
 
     await subscriptionRepository.createSubscriptionChange({
@@ -67,7 +74,7 @@ export const subscriptionManagementService = {
       changedBySuperAdminId: superAdminId,
       action: "SUSPEND",
       oldStatus,
-      newStatus: "SUSPENDED",
+      newStatus: SubscriptionStatus.SUSPENDED,
       reason,
     });
 
@@ -75,7 +82,7 @@ export const subscriptionManagementService = {
       action: "SUSPEND",
       subscriptionId,
       oldStatus,
-      newStatus: "SUSPENDED",
+      newStatus: SubscriptionStatus.SUSPENDED,
       reason,
     });
 
@@ -94,7 +101,7 @@ export const subscriptionManagementService = {
 
     const oldStatus = subscription.status;
     const updated = await subscriptionRepository.update(subscriptionId, {
-      status: "CANCELED",
+      status: SubscriptionStatus.CANCELED,
     });
 
     await subscriptionRepository.createSubscriptionChange({
@@ -102,7 +109,7 @@ export const subscriptionManagementService = {
       changedBySuperAdminId: superAdminId,
       action: "CANCEL",
       oldStatus,
-      newStatus: "CANCELED",
+      newStatus: SubscriptionStatus.CANCELED,
       reason,
     });
 
@@ -110,7 +117,7 @@ export const subscriptionManagementService = {
       action: "CANCEL",
       subscriptionId,
       oldStatus,
-      newStatus: "CANCELED",
+      newStatus: SubscriptionStatus.CANCELED,
       reason,
     });
 
@@ -121,7 +128,8 @@ export const subscriptionManagementService = {
     subscriptionId: string,
     newPlanTier: PlanTier,
     superAdminId: string,
-    reason?: string
+    reason?: string,
+    billingCycle?: string | null
   ) {
     const subscription = await subscriptionRepository.findById(subscriptionId);
     if (!subscription) {
@@ -129,19 +137,28 @@ export const subscriptionManagementService = {
     }
 
     const oldPlanTier = subscription.planTier;
+    const cycle: SubscriptionBillingCycle =
+      newPlanTier === PlanTier.PRO
+        ? normalizeBillingCycle(billingCycle ?? subscription.billingCycle ?? DEFAULT_BILLING_CYCLE)
+        : DEFAULT_BILLING_CYCLE;
+    const cycleChanged = normalizeBillingCycle(subscription.billingCycle) !== cycle;
     const period =
       newPlanTier === PlanTier.PRO
         ? oldPlanTier === PlanTier.PRO
-          ? buildActiveAnniversaryBillingPeriod({
+          ? cycleChanged && isFixedDurationBillingCycle(cycle)
+            ? buildInitialAnniversaryBillingPeriod(new Date(), cycle)
+            : buildActiveAnniversaryBillingPeriod({
               subscriptionStartDate:
                 subscription.subscriptionStartDate ??
                 subscription.currentPeriodStart ??
                 subscription.createdAt,
+              billingCycle: cycle,
               billingAnchorDay: subscription.billingAnchorDay,
               currentPeriodStart: subscription.currentPeriodStart,
-              nextBillingAt: subscription.nextBillingAt,
+              nextBillingAt:
+                normalizeBillingCycle(subscription.billingCycle) === cycle ? subscription.nextBillingAt : null,
             })
-          : buildInitialAnniversaryBillingPeriod(new Date())
+          : buildInitialAnniversaryBillingPeriod(new Date(), cycle)
         : {
             subscriptionStartDate: null,
             billingAnchorDay: null,
@@ -149,9 +166,15 @@ export const subscriptionManagementService = {
             currentPeriodEnd: null,
             nextBillingAt: null,
           };
+    const status =
+      newPlanTier === PlanTier.PRO && oldPlanTier === PlanTier.PRO
+        ? subscription.status
+        : getDefaultSubscriptionStatus(newPlanTier === PlanTier.PRO, cycle);
+
     const updated = await subscriptionRepository.update(subscriptionId, {
       planTier: newPlanTier,
-      billingCycle: newPlanTier === PlanTier.PRO ? BillingCycle.MONTHLY : null,
+      billingCycle: newPlanTier === PlanTier.PRO ? (cycle as BillingCycle) : null,
+      status,
       subscriptionStartDate: period.subscriptionStartDate,
       billingAnchorDay: period.billingAnchorDay,
       currentPeriodStart: period.currentPeriodStart,
@@ -201,11 +224,14 @@ export const subscriptionManagementService = {
     });
 
     let action: SubscriptionAction = "ACTIVATE";
-    if (newStatus === "SUSPENDED") {
+    if (newStatus === SubscriptionStatus.SUSPENDED || newStatus === SubscriptionStatus.PAST_DUE) {
       action = "SUSPEND";
-    } else if (newStatus === "CANCELED") {
+    } else if (newStatus === SubscriptionStatus.CANCELED || newStatus === SubscriptionStatus.EXPIRED) {
       action = "CANCEL";
-    } else if (newStatus === "ACTIVE" && oldStatus !== "ACTIVE") {
+    } else if (
+      (newStatus === SubscriptionStatus.ACTIVE || newStatus === SubscriptionStatus.TRIALING) &&
+      oldStatus !== newStatus
+    ) {
       action = "ACTIVATE";
     }
 

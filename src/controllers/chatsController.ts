@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import { Role } from "@prisma/client";
 import { AuthenticatedRequest } from "../middlewares/authMiddleware";
+import { getCompanyIdOrThrow } from "../middlewares/requireCompanyMiddleware";
 import { AppError } from "../utils/appError";
 import { chatService } from "../services/chatService";
 import { chatRepository } from "../repositories/chatRepository";
@@ -10,7 +11,6 @@ import {
   assertAgentCanAccessChatOrThrow,
   assertAgentCanAccessPropertyOrThrow,
   getAgentPropertyFilter,
-  checkAgentPropertyAccess,
   shouldRestrictAgentToAssignedChats,
 } from "../utils/agentPropertyFilter";
 import { visitorEventRepository } from "../repositories/visitorEventRepository";
@@ -18,17 +18,52 @@ import { visitorRepository } from "../repositories/visitorRepository";
 import { chatRatingRepository } from "../repositories/chatRatingRepository";
 import prisma from "../lib/prisma";
 import { getPropertyDefaultAgents } from "../helpers/propertyDefaultAgent";
+import { leadRepository, type LeadSessionSummary } from "../repositories/leadRepository";
+import { getLeadVisitorName, getVisitorFirstName } from "../utils/leadVisitorName";
 
+const EMPTY_MESSAGES_RESULT = {
+  messages: [],
+  nextCursor: null,
+  hasMore: false,
+  limit: 50,
+};
+
+function resolveVisitorFullName(input: {
+  lead?: { fullName?: string | null } | null;
+  visitor?: { name?: string | null } | null;
+}): string | null {
+  return input.lead?.fullName?.trim() || input.visitor?.name?.trim() || null;
+}
+
+function resolveVisitorFirstName(input: {
+  lead?: { fullName?: string | null } | null;
+  visitor?: { name?: string | null } | null;
+}): string | null {
+  return getLeadVisitorName(input.lead) ?? getVisitorFirstName(input.visitor?.name);
+}
+
+function leadSessionKey(propertyId: string, sessionId: string): string {
+  return `${propertyId}:${sessionId}`;
+}
+
+function buildLatestLeadBySession(leads: LeadSessionSummary[]): Map<string, LeadSessionSummary> {
+  const map = new Map<string, LeadSessionSummary>();
+  for (const lead of leads) {
+    if (!lead.chat) continue;
+    const key = leadSessionKey(lead.chat.propertyId, lead.chat.sessionId);
+    if (!map.has(key)) {
+      map.set(key, lead);
+    }
+  }
+  return map;
+}
 
 export async function listChatsHandler(
   req: AuthenticatedRequest,
   res: Response
 ) {
-  const companyId = req.user?.companyId;
+  const companyId = getCompanyIdOrThrow(req);
   const userId = req.user?.id;
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
 
   const {
     status,
@@ -43,11 +78,9 @@ export async function listChatsHandler(
   const limitNum = parseInt(limit as string) || 50;
   const skip = (pageNum - 1) * limitNum;
 
-  // Get agent property filter
   const propertyFilter = userId ? await getAgentPropertyFilter(userId) : { propertyIds: null, isFiltered: false };
   const assignedOnly = userId ? await shouldRestrictAgentToAssignedChats(userId) : false;
 
-  // Build where clause
   const where: any = {
     companyId,
     deletedAt: null,
@@ -57,10 +90,8 @@ export async function listChatsHandler(
     where.status = status;
   }
 
-  // Apply property filter for agents
   if (propertyFilter.isFiltered && propertyFilter.propertyIds !== null) {
     if (propertyFilter.propertyIds.length === 0) {
-      // Agent has no properties assigned, return empty
       return successResponse(res, {
         statusCode: 200,
         data: [],
@@ -74,13 +105,11 @@ export async function listChatsHandler(
     }
 
     if (propertyId) {
-      // If specific property requested, check if agent has access
       if (!propertyFilter.propertyIds.includes(propertyId as string)) {
         return errorResponse(res, { message: "Access denied to this property", statusCode: 403 });
       }
       where.propertyId = propertyId;
     } else {
-      // Filter to only assigned properties
       where.propertyId = { in: propertyFilter.propertyIds };
     }
   } else if (propertyId) {
@@ -112,10 +141,17 @@ export async function listChatsHandler(
     chatRepository.findManyWithFilters(where, skip, limitNum),
     chatRepository.countWithFilters(where),
   ]);
-  const defaultAgentsByProperty = await getPropertyDefaultAgents(
-    companyId,
-    chats.map((chat) => chat.propertyId)
-  );
+  const [defaultAgentsByProperty, latestLeadBySession] = await Promise.all([
+    getPropertyDefaultAgents(
+      companyId,
+      chats.map((chat) => chat.propertyId)
+    ),
+    leadRepository.findLatestByChatSessions({
+      companyId,
+      propertyIds: chats.map((chat) => chat.propertyId),
+      sessionIds: chats.map((chat) => chat.sessionId),
+    }).then(buildLatestLeadBySession),
+  ]);
 
   return successResponse(res, {
     statusCode: 200,
@@ -131,9 +167,14 @@ export async function listChatsHandler(
             }
           : null);
 
+      const lead = chat.leads?.[0] ?? latestLeadBySession.get(leadSessionKey(chat.propertyId, chat.sessionId)) ?? null;
+
       return {
         id: chat.id,
         sessionId: chat.sessionId,
+        visitorName: resolveVisitorFirstName({ lead, visitor: chat.visitor }),
+        visitorFullName: resolveVisitorFullName({ lead, visitor: chat.visitor }),
+        lead: chat.leads?.[0] ?? null,
         status: chat.status,
         propertyId: chat.propertyId,
         visitorId: chat.visitorId,
@@ -162,44 +203,33 @@ export async function getInboxHandler(
   req: AuthenticatedRequest,
   res: Response
 ) {
-  const companyId = req.user?.companyId;
+  const companyId = getCompanyIdOrThrow(req);
   const currentUserId = req.user?.id;
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
-
   const { propertyId } = req.query;
 
-  // Get agent property filter
   const propertyFilter = currentUserId ? await getAgentPropertyFilter(currentUserId) : { propertyIds: null, isFiltered: false };
   const assignedOnly = currentUserId
     ? await shouldRestrictAgentToAssignedChats(currentUserId)
     : false;
 
-  // Apply property filter for agents
   let finalPropertyId: string | undefined = typeof propertyId === "string" ? propertyId : undefined;
 
   if (propertyFilter.isFiltered && propertyFilter.propertyIds !== null) {
     if (propertyFilter.propertyIds.length === 0) {
-      // Agent has no properties assigned, return empty
       return successResponse(res, { statusCode: 200, data: [] });
     }
 
     if (finalPropertyId) {
-      // If specific property requested, check if agent has access
       if (!propertyFilter.propertyIds.includes(finalPropertyId)) {
         throw new AppError(403, "Access denied to this property");
       }
     } else {
-      // If no specific property requested, filter to first assigned property (or all if multiple)
-      // For inbox, we'll filter the results after fetching
-      finalPropertyId = undefined; // Let service fetch all, then filter
+      finalPropertyId = undefined;
     }
   }
 
   const items = await chatService.getInbox(companyId, finalPropertyId, currentUserId);
 
-  // Filter results by agent property access if needed
   let filteredItems = items;
   if (propertyFilter.isFiltered && propertyFilter.propertyIds !== null && propertyFilter.propertyIds.length > 0 && !finalPropertyId) {
     filteredItems = items.filter(item => propertyFilter.propertyIds!.includes(item.propertyId));
@@ -243,76 +273,47 @@ export async function getChatHandler(
   res: Response
 ) {
   const { id } = req.params;
-  const companyId = req.user?.companyId;
+  const companyId = getCompanyIdOrThrow(req);
   const userId = req.user?.id;
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
 
   const chat = await chatRepository.findById(id, companyId);
   if (!chat) {
     throw new AppError(404, "Chat not found");
   }
 
-  // Check agent property access
   if (userId) {
     await assertAgentCanAccessChatOrThrow(userId, chat);
   }
 
-  // Get visitor info - handle errors gracefully
-  let visitorInfo = null;
-  try {
-    visitorInfo = await visitorEventRepository.getVisitorInfoByChatId(id, companyId);
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    // Continue without visitor info rather than failing the entire request
-  }
+  const [visitorInfo, visitorRecord, messagesResult, chatRating, chatLead] = await Promise.all([
+    visitorEventRepository.getVisitorInfoByChatId(id, companyId).catch(() => null),
+    chat.visitorId
+      ? visitorRepository.findById(chat.visitorId).catch(() => null)
+      : visitorRepository.findBySessionId(chat.sessionId, companyId).catch(() => null),
+    chatService.getMessagesCursor(id, companyId).catch(() => EMPTY_MESSAGES_RESULT),
+    chatRatingRepository.findByChatId(id).catch(() => null),
+    leadRepository.findByChatId(id, companyId).catch(() => null),
+  ]);
+  const lead =
+    chatLead ??
+    (await leadRepository
+      .findLatestByChatSession({
+        companyId,
+        propertyId: chat.propertyId,
+        sessionId: chat.sessionId,
+      })
+      .catch(() => null));
 
-  let visitorRecord = null;
-  try {
-    visitorRecord = chat.visitorId
-      ? await visitorRepository.findById(chat.visitorId)
-      : await visitorRepository.findBySessionId(chat.sessionId, companyId);
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    // Continue without visitor fallback rather than failing the entire request
-  }
-
-  // Get messages - handle errors gracefully
-  // Load more messages initially (500) to reduce pagination needs for most chats
-  let messagesResult;
-  try {
-    messagesResult = await chatService.getMessages(id, companyId, 1, 500);
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    // Return empty messages array if there's an error
-    messagesResult = {
-      messages: [],
-      total: 0,
-      page: 1,
-      limit: 500,
-    };
-  }
-
-  // Check if visitor is currently online - verify sockets are actually connected
   const io = getIO();
   const isOnline = await isVisitorOnline(id, io);
 
-  // Get rating if available
-  let rating = null;
-  try {
-    const chatRating = await chatRatingRepository.findByChatId(id);
-    if (chatRating) {
-      rating = {
+  const rating = chatRating
+    ? {
         rating: chatRating.rating,
         comment: chatRating.comment,
         createdAt: chatRating.createdAt,
-      };
-    }
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    // Continue without rating rather than failing the entire request
-  }
+      }
+    : null;
 
   const defaultAgentsByProperty = await getPropertyDefaultAgents(companyId, [chat.propertyId]);
   const defaultAgent = defaultAgentsByProperty.get(chat.propertyId) ?? null;
@@ -331,11 +332,20 @@ export async function getChatHandler(
       })
     : null;
   const effectiveAgent = explicitAgent ?? defaultAgent;
+  const visitorFullName = resolveVisitorFullName({ lead, visitor: visitorRecord });
 
   const responseData = {
     chat: {
       id: chat.id,
       sessionId: chat.sessionId,
+      visitorName: getLeadVisitorName(lead) ?? getVisitorFirstName(visitorRecord?.name),
+      visitorFullName,
+      lead: lead
+        ? {
+            id: lead.id,
+            fullName: lead.fullName,
+          }
+        : null,
       status: chat.status,
       propertyId: chat.propertyId,
       visitorId: chat.visitorId,
@@ -359,6 +369,11 @@ export async function getChatHandler(
       ipAddress: visitorInfo?.ipAddress ?? visitorRecord?.ipAddress ?? null,
     } : null,
     messages: messagesResult.messages,
+    messagesPagination: {
+      nextCursor: messagesResult.nextCursor,
+      hasMore: messagesResult.hasMore,
+      limit: messagesResult.limit,
+    },
     rating,
   };
 
@@ -373,15 +388,8 @@ export async function assignChatHandler(
   res: Response
 ) {
   const { chatId, agentId } = req.body ?? {};
-  const companyId = req.user?.companyId;
+  const companyId = getCompanyIdOrThrow(req);
   const userId = req.user?.id;
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
-
-  if (!chatId) {
-    throw new AppError(400, "chatId is required");
-  }
 
   const chat = await chatRepository.findById(chatId, companyId);
   if (!chat) {
@@ -393,13 +401,18 @@ export async function assignChatHandler(
 
   const result = await chatService.assignAgent(chatId, companyId, agentId || null);
   const io = getIO();
-  if (chat) {
-    // Emit standardized chat_assigned event
-    io.to(`chat:${chatId}`).emit("chat_assigned", { chatId, agentId });
-    // Also emit for backward compatibility
-    io.to(`chat:${chatId}`).emit("chat:assigned", { chatId, agentId });
-    io.to(`property:${chat.propertyId}`).emit("chat:updated", { chatId });
-  }
+  const assignedAgent = agentId
+    ? await prisma.user.findUnique({
+        where: { id: agentId },
+        select: { name: true, email: true },
+      })
+    : null;
+  const agentName = assignedAgent?.name || assignedAgent?.email || null;
+  const assignmentPayload = { chatId, agentId, agentName };
+
+  io.to(`chat:${chatId}`).emit("chat_assigned", assignmentPayload);
+  io.to(`chat:${chatId}`).emit("chat:assigned", assignmentPayload);
+  io.to(`property:${chat.propertyId}`).emit("chat:updated", { chatId });
 
   return successResponse(res, { statusCode: 200, data: result });
 }
@@ -408,18 +421,9 @@ export async function listAssignableAgentsHandler(
   req: AuthenticatedRequest,
   res: Response
 ) {
-  const companyId = req.user?.companyId;
+  const companyId = getCompanyIdOrThrow(req);
   const userId = req.user?.id;
-  const propertyId =
-    typeof req.query.propertyId === "string" ? req.query.propertyId : undefined;
-
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
-
-  if (!propertyId) {
-    throw new AppError(400, "propertyId is required");
-  }
+  const propertyId = req.query.propertyId as string;
 
   if (userId) {
     await assertAgentCanAccessPropertyOrThrow(userId, propertyId);
@@ -509,15 +513,8 @@ export async function closeChatHandler(
   res: Response
 ) {
   const { chatId } = req.body ?? {};
-  const companyId = req.user?.companyId;
+  const companyId = getCompanyIdOrThrow(req);
   const userId = req.user?.id;
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
-
-  if (!chatId) {
-    throw new AppError(400, "chatId is required");
-  }
 
   const chat = await chatRepository.findById(chatId, companyId);
   if (!chat) {
@@ -529,10 +526,8 @@ export async function closeChatHandler(
 
   const result = await chatService.closeChat(chatId, companyId);
   const io = getIO();
-  if (chat) {
-    io.to(`chat:${chatId}`).emit("chat:closed", { chatId });
-    io.to(`property:${chat.propertyId}`).emit("chat:updated", { chatId });
-  }
+  io.to(`chat:${chatId}`).emit("chat:closed", { chatId });
+  io.to(`property:${chat.propertyId}`).emit("chat:updated", { chatId });
 
   return successResponse(res, { statusCode: 200, data: result });
 }
@@ -542,10 +537,7 @@ export async function deleteChatHandler(
   res: Response
 ) {
   const { id } = req.params;
-  const companyId = req.user?.companyId;
-  if (!companyId) {
-    throw new AppError(403, "Forbidden: Company context required");
-  }
+  const companyId = getCompanyIdOrThrow(req);
 
   const chat = await chatRepository.findById(id, companyId);
   if (!chat) {

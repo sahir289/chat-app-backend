@@ -39,6 +39,7 @@ export class WebhookCrmProvider implements CrmProviderClient {
       lead: {
         id: input.lead.leadId,
         name: input.lead.name,
+        userId: input.lead.userId,
         email: input.lead.email,
         phone: input.lead.phone,
         companyName: input.lead.companyName,
@@ -65,6 +66,7 @@ export class WebhookCrmProvider implements CrmProviderClient {
       },
       mappedFields: input.mappedFields,
       duplicateKey: {
+        userId: input.lead.userId,
         email: input.lead.email,
         phone: input.lead.phone,
         chatbotLeadId: input.lead.leadId,

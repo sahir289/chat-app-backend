@@ -11,6 +11,7 @@ import {
   type Prisma,
 } from "@prisma/client";
 import prisma from "../../lib/prisma";
+import { readLeadUserId } from "../../repositories/leadRepository";
 import { crmRepository } from "../../repositories/crmRepository";
 import { AppError } from "../../utils/appError";
 import { getModuleLogger } from "../../utils/logger";
@@ -494,7 +495,7 @@ export const crmService = {
     const providerName = provider ?? await this.getDefaultProvider(companyId);
     const integration = await this.getConnectedIntegration(companyId, providerName);
     const lead = await prisma.lead.findFirst({
-      where: { id: leadId, companyId },
+      where: { id: leadId, companyId, property: { deletedAt: null } },
       select: { id: true, chatId: true },
     });
     if (!lead) {
@@ -533,6 +534,7 @@ export const crmService = {
       where: {
         companyId,
         id: { in: uniqueLeadIds },
+        property: { deletedAt: null },
       },
       select: {
         id: true,
@@ -597,6 +599,7 @@ export const crmService = {
         companyId,
         ...(params.propertyId ? { propertyId: params.propertyId } : {}),
         ...(sourceFilter ? { source: sourceFilter } : {}),
+        property: { deletedAt: null },
         crmLinks: {
           none: {
             provider,
@@ -711,7 +714,7 @@ export const crmService = {
 
   async normalizeLead(companyId: string, leadId: string): Promise<NormalizedCrmLead> {
     const lead = await prisma.lead.findFirst({
-      where: { id: leadId, companyId },
+      where: { id: leadId, companyId, property: { deletedAt: null } },
       include: {
         chat: {
           include: {
@@ -755,6 +758,7 @@ export const crmService = {
       status: lead.status,
       name: lead.fullName,
       email: lead.email,
+      userId: readLeadUserId(lead) ?? lead.chat?.visitor?.externalId ?? null,
       phone: lead.phone,
       companyName: lead.companyName,
       message: latestVisitorMessage?.text ?? lead.notes,
@@ -894,6 +898,7 @@ function readLeadPath(lead: NormalizedCrmLead, path: string): unknown {
   const sourceLookup: Record<string, unknown> = {
     "visitor.name": lead.name,
     "visitor.email": lead.email,
+    "visitor.userId": lead.userId,
     "visitor.phone": lead.phone,
     "lead.source": lead.source.toLowerCase(),
     "lead.channel": lead.channel,

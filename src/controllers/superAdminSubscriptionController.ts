@@ -4,6 +4,7 @@ import { AppError } from "../utils/appError";
 import { superAdminSubscriptionService } from "../services/superAdminSubscriptionService";
 import type { PlanTier, SubscriptionStatus } from "@prisma/client";
 import { successResponse } from "../utils/apiResponse";
+import { SUBSCRIPTION_BILLING_CYCLES } from "../services/subscriptionService";
 
 /**
  * Get all companies with their Pro status
@@ -49,13 +50,17 @@ export async function enableProAccessHandler(
 ) {
     const { id } = req.params; // companyId
     const userId = req.user?.id;
-    const { reason } = req.body;
+    const { reason, billingCycle } = req.body;
 
     if (!userId) {
       throw new AppError(401, "Unauthorized");
     }
 
-    const company = await superAdminSubscriptionService.enableProAccess(id, userId, reason);
+    if (billingCycle && !SUBSCRIPTION_BILLING_CYCLES.includes(billingCycle)) {
+      throw new AppError(400, "Invalid billingCycle");
+    }
+
+    const company = await superAdminSubscriptionService.enableProAccess(id, userId, reason, billingCycle);
     return successResponse(res, { data: company, statusCode: 200 });
   }
 
@@ -87,7 +92,7 @@ export async function changePlanHandler(
 ) {
     const { id } = req.params; // subscriptionId
     const userId = req.user?.id;
-    const { planTier, reason } = req.body;
+    const { planTier, reason, billingCycle } = req.body;
 
     if (!userId) {
       throw new AppError(401, "Unauthorized");
@@ -97,11 +102,16 @@ export async function changePlanHandler(
       throw new AppError(400, "Invalid planTier. Must be FREE or PRO");
     }
 
+    if (billingCycle && !SUBSCRIPTION_BILLING_CYCLES.includes(billingCycle)) {
+      throw new AppError(400, "Invalid billingCycle");
+    }
+
     const updated = await superAdminSubscriptionService.changePlan(
       id,
       planTier as PlanTier,
       userId,
-      reason
+      reason,
+      billingCycle
     );
 
     return successResponse(res, { data: updated, statusCode: 200 });

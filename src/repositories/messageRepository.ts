@@ -111,6 +111,65 @@ export const messageRepository = {
         });
     },
 
+    /**
+     * Cursor-based pagination for chat messages.
+     * Returns messages in descending createdAt order (newest first in the batch).
+     * When cursorMessageId is provided, returns messages older than that message.
+     */
+    async listByChatCursor(
+        chatId: string,
+        limit: number,
+        cursorMessageId?: string
+    ): Promise<Message[]> {
+        let cursorCreatedAt: Date | undefined;
+        let cursorId: string | undefined;
+
+        if (cursorMessageId) {
+            const cursorMessage = await prisma.message.findFirst({
+                where: {
+                    id: cursorMessageId,
+                    chatId,
+                    deletedAt: null,
+                    isDeleted: false,
+                },
+                select: { id: true, createdAt: true },
+            });
+
+            if (!cursorMessage) {
+                return [];
+            }
+
+            cursorCreatedAt = cursorMessage.createdAt;
+            cursorId = cursorMessage.id;
+        }
+
+        return prisma.message.findMany({
+            where: {
+                chatId,
+                deletedAt: null,
+                isDeleted: false,
+                ...(cursorCreatedAt && cursorId
+                    ? {
+                          OR: [
+                              { createdAt: { lt: cursorCreatedAt } },
+                              { createdAt: cursorCreatedAt, id: { lt: cursorId } },
+                          ],
+                      }
+                    : {}),
+            },
+            include: {
+                attachments: {
+                    orderBy: { createdAt: "asc" },
+                },
+                messageButtons: {
+                    orderBy: { order: "asc" },
+                },
+            },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: limit + 1,
+        });
+    },
+
     async countByChat(chatId: string): Promise<number> {
         try {
             return await prisma.message.count({

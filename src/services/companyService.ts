@@ -443,7 +443,12 @@ export const companyService = {
      * Toggle Pro status for a company
      * Only SUPER_ADMIN can toggle Pro status
      */
-    async toggleProStatus(companyId: string, isPro: boolean, processedById?: string) {
+    async toggleProStatus(
+        companyId: string,
+        isPro: boolean,
+        processedById?: string,
+        billingCycle?: string | null
+    ) {
         const company = await companyRepository.findById(companyId);
 
         if (!company) {
@@ -478,7 +483,7 @@ export const companyService = {
             }
         }
 
-        await subscriptionService.syncSubscriptionForCompany(companyId, updated.isPro);
+        await subscriptionService.syncSubscriptionForCompany(companyId, updated.isPro, billingCycle);
 
         return {
             id: updated.id,

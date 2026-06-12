@@ -6,6 +6,8 @@ export interface ChatDTO {
     id: string;
     propertyId: string;
     sessionId: string;
+    visitorName?: string | null;
+    visitorFullName?: string | null;
     status: string; // Can be "ACTIVE" | "CLOSED" | "ARCHIVED" as string for compatibility
     createdAt: Date;
 }
@@ -42,6 +44,7 @@ export interface MessageDTO {
     senderType: SenderKind;
     text: string;
     createdAt: Date;
+    senderName?: string | null;
     attachments?: AttachmentDTO[];
     quickReplies?: QuickReplyDTO[];
     metadata?: any;
@@ -53,6 +56,8 @@ export interface MessageDTO {
 export interface DashboardChatItemDTO {
     id: string;
     sessionId: string;
+    visitorName?: string | null;
+    visitorFullName?: string | null;
     status: string;
     createdAt: Date;
     lastMessage: MessageDTO | null;

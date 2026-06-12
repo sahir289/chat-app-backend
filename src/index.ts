@@ -106,37 +106,61 @@ async function bootstrap(): Promise<void> {
     throw new StartupAbortError("Database startup check failed");
   }
 
-  const redis = getRedisClient();
-
-  redis.on("end", () => {
-    if (isShuttingDown) {
-      return;
+  const redisRequired = config.redis.required;
+  const redisUrl = (process.env.REDIS_URL || "redis://redis:6379").trim();
+  if (!redisUrl) {
+    if (redisRequired) {
+      throw new StartupAbortError("REDIS_REQUIRED=true but REDIS_URL is not configured");
     }
+    log.warn("[index] REDIS_URL not configured; continuing without Redis (fallback mode enabled)");
+  } else {
+    const redis = getRedisClient();
 
-    log.error("[index] Redis connection ended after max retry attempts. Forcing server shutdown.", {
-      attempts: REDIS_RECONNECT_ATTEMPTS,
-      retryDelayMs: REDIS_RECONNECT_DELAY_MS,
-      status: redis.status,
+    redis.on("end", () => {
+      if (isShuttingDown) {
+        return;
+      }
+
+      if (redisRequired) {
+        log.error("[index] Redis connection ended after max retry attempts. Forcing server shutdown.", {
+          attempts: REDIS_RECONNECT_ATTEMPTS,
+          retryDelayMs: REDIS_RECONNECT_DELAY_MS,
+          status: redis.status,
+        });
+        void gracefulShutdown("redis-end");
+        return;
+      }
+
+      log.warn("[index] Redis connection ended. Continuing in fallback mode.", {
+        attempts: REDIS_RECONNECT_ATTEMPTS,
+        retryDelayMs: REDIS_RECONNECT_DELAY_MS,
+        status: redis.status,
+      });
     });
-    void gracefulShutdown("redis-end");
-  });
 
-  const redisReady = await waitForRedisReady(REDIS_STARTUP_TIMEOUT_MS);
+    const redisReady = await waitForRedisReady(REDIS_STARTUP_TIMEOUT_MS);
 
-  if (!redisReady) {
-    log.error("[index] Redis connection check failed:", {
-      message: `Redis did not become ready after ${REDIS_RECONNECT_ATTEMPTS} attempts with ${REDIS_RECONNECT_DELAY_MS}ms delay`,
-      startupTimeoutMs: REDIS_STARTUP_TIMEOUT_MS,
-      status: redis.status,
-    });
-    log.error("[index] Exiting because Redis is required at startup");
-    isShuttingDown = true;
-    stopDatabaseHealthMonitor();
-    await closeRuntimeResources();
-    process.exit(1);
+    if (!redisReady) {
+      const payload = {
+        message: `Redis did not become ready after ${REDIS_RECONNECT_ATTEMPTS} attempts with ${REDIS_RECONNECT_DELAY_MS}ms delay`,
+        startupTimeoutMs: REDIS_STARTUP_TIMEOUT_MS,
+        status: redis.status,
+      };
+
+      if (redisRequired) {
+        log.error("[index] Redis connection check failed:", payload);
+        log.error("[index] Exiting because REDIS_REQUIRED=true");
+        isShuttingDown = true;
+        stopDatabaseHealthMonitor();
+        await closeRuntimeResources();
+        process.exit(1);
+      } else {
+        log.warn("[index] Redis unavailable at startup; continuing in fallback mode", payload);
+      }
+    } else {
+      log.info("Redis connection check passed");
+    }
   }
-
-  log.info("Redis connection check passed");
 
   initSocket(server);
   server.listen(config.server.port, () => {

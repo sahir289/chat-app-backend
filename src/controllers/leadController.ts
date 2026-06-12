@@ -28,16 +28,17 @@ export async function createLeadHandler(
   req: Request,
   res: Response
 ) {
-  const { chatId, widgetKey, sessionId, fullName, email, phone } = req.body;
+  const { chatId, widgetKey, sessionId, fullName, userId, phone } = req.body;
 
-  const normalizedPhone = String(phone).trim();
+  const normalizedPhone =
+    phone != null && String(phone).trim() !== "" ? String(phone).trim() : undefined;
 
   const data = await leadService.createLead({
-    chatId,
+    chatId: typeof chatId === "string" && chatId.trim() !== "" ? chatId.trim() : undefined,
     widgetKey,
     sessionId,
     fullName,
-    email,
+    userId,
     phone: normalizedPhone,
   });
 
@@ -155,11 +156,12 @@ export async function listLeadsHandler(
   if (propertyId) where.propertyId = propertyId as string;
   if (chatId) where.chatId = chatId as string;
 
-  // Search filter - search in fullName, email, and phone only
+  // Search filter - search in fullName, userId, email, and phone
   if (search && typeof search === "string" && search.trim()) {
     const searchTerm = search.trim();
     where.OR = [
       { fullName: { contains: searchTerm, mode: "insensitive" } },
+      { userId: { contains: searchTerm, mode: "insensitive" } },
       { email: { contains: searchTerm, mode: "insensitive" } },
       { phone: { contains: searchTerm, mode: "insensitive" } },
     ];
@@ -189,7 +191,8 @@ export async function listLeadsHandler(
         // Mask sensitive fields for leads > 10
         return {
           ...lead,
-          email: "***@***.***",
+          email: lead.email ? "***@***.***" : null,
+          userId: lead.userId ? "***" : null,
           phone: lead.phone ? "***-***-****" : null,
           isBlurred: true,
         };

@@ -1,6 +1,20 @@
 import prisma from "../lib/prisma";
 import type { Chat, Message, SenderType, ChatStatus } from "@prisma/client";
 
+type ChatLeadSummary = {
+    id: string;
+    fullName: string;
+};
+
+type ChatVisitorSummary = {
+    id: string;
+    sessionId: string;
+    name: string | null;
+    device?: string | null;
+    browser?: string | null;
+    country?: string | null;
+};
+
 type UnreadLastMessage = {
     id: string;
     text: string;
@@ -135,7 +149,11 @@ export const chatRepository = {
     async listByPropertyWithLastMessage(
         companyId: string,
         propertyId: string
-    ): Promise<(Chat & { messages: Message[] })[]> {
+    ): Promise<(Chat & {
+        messages: Message[];
+        leads: ChatLeadSummary[];
+        visitor: ChatVisitorSummary | null;
+    })[]> {
         return prisma.chat.findMany({
             where: {
                 companyId,
@@ -151,6 +169,21 @@ export const chatRepository = {
                     },
                     orderBy: { createdAt: "desc" },
                     take: 1,
+                },
+                leads: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                    },
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
+                },
+                visitor: {
+                    select: {
+                        id: true,
+                        sessionId: true,
+                        name: true,
+                    },
                 },
             },
         });
@@ -207,6 +240,12 @@ export const chatRepository = {
             orderBy: { createdAt: "asc" },
             include: {
                 attachments: true,
+                agent: {
+                    select: {
+                        name: true,
+                        email: true,
+                    },
+                },
                 messageQuickReplies: {
                     orderBy: { order: "asc" },
                 },
@@ -404,6 +443,7 @@ export const chatRepository = {
         visitor: {
             id: string;
             sessionId: string;
+            name: string | null;
             device: string | null;
             browser: string | null;
             country: string | null;
@@ -413,6 +453,7 @@ export const chatRepository = {
             name: string | null;
             email: string;
         } | null;
+        leads: ChatLeadSummary[];
         messages: Message[];
     })[]> {
         return prisma.chat.findMany({
@@ -425,6 +466,7 @@ export const chatRepository = {
                     select: {
                         id: true,
                         sessionId: true,
+                        name: true,
                         device: true,
                         browser: true,
                         country: true,
@@ -436,6 +478,14 @@ export const chatRepository = {
                         name: true,
                         email: true,
                     },
+                },
+                leads: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                    },
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
                 },
                 messages: {
                     where: {
@@ -465,6 +515,8 @@ export const chatRepository = {
             name: string | null;
             email: string;
         } | null;
+        leads: ChatLeadSummary[];
+        visitor: ChatVisitorSummary | null;
     })[]> {
         return prisma.chat.findMany({
             where: {
@@ -482,6 +534,21 @@ export const chatRepository = {
                         name: true,
                         email: true,
                     },
+                },
+                visitor: {
+                    select: {
+                        id: true,
+                        sessionId: true,
+                        name: true,
+                    },
+                },
+                leads: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                    },
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
                 },
                 messages: {
                     where: {

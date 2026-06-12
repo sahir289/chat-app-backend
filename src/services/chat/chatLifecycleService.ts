@@ -11,7 +11,6 @@ import { aiService } from "../aiService";
 import { aiCreditsService } from "../aiCreditsService";
 import { AppError } from "../../utils/appError";
 import type { MessageDTO, ChatDTO } from "../../types/chat";
-import { hasOnlineAgents } from "../../socket/index";
 import { parseUserAgent } from "../../utils/userAgentParser";
 import prisma from "../../lib/prisma";
 import { validateMessageLength, isVisitorSenderType } from "../../utils/messageValidation";
@@ -19,7 +18,6 @@ import { detectClosingIntent } from "../../utils/closingIntentDetection";
 import {
     appendClosingMessageIfNeeded,
     shouldCloseChatFromIntent,
-    shouldRequestLeadInfo,
 } from "../../helpers/chat/chatLifecycleHelpers";
 import {
     FILE_UPLOAD_ACK_DELAY_MS,
@@ -34,6 +32,7 @@ import {
 } from "../../constants/knowledge";
 import { agentAccessService } from "../agentAccessService";
 import { crmService } from "../crm/crm.service";
+import { conversationRoutingService } from "../conversationRoutingService";
 
 function getMessageClientMessageId(message: Message): string | null {
     if (message.clientMessageId) {
@@ -82,23 +81,14 @@ async function executeVisitorBotReply(
 
     const hasClosingIntent = detectClosingIntent(text);
 
-    const property = await propertyRepository.findById(chat.propertyId, chat.companyId);
-    const company = await prisma.company.findUnique({
-        where: { id: chat.companyId },
-        select: { isPro: true },
+    const routingDecision = await conversationRoutingService.decideHandler({
+        propertyId: chat.propertyId,
+        companyId: chat.companyId,
+        chatId: chat.id,
     });
-    const isPro = company?.isPro ?? false;
-    const isAiEnabled =
-        property?.aiEnabled !== false &&
-        isPro &&
-        chat.aiEnabled !== false &&
-        !chat.agentId;
+    const isAiEnabled = routingDecision.handler === "ai";
     const matchedQuickReply = await chatAutoReplyService.findQuickReplyMatch(chat.propertyId, text);
-    const hasAvailableAiCredits = isAiEnabled
-        ? await aiCreditsService.hasAvailableCredits(chat.companyId)
-        : false;
-
-    const agentsAvailable = await hasOnlineAgents(chat.propertyId);
+    const hasAvailableAiCredits = routingDecision.hasAiCredits;
 
     const chatContext = {
         id: chat.id,
@@ -169,15 +159,7 @@ async function executeVisitorBotReply(
             }
         }
 
-        if (agentsAvailable) {
-            await chatSchedulerService.scheduleDelayedBotMessage(
-                chat.id,
-                chat.propertyId,
-                chat.companyId,
-                text,
-                section,
-                userMessage.createdAt
-            );
+        if (routingDecision.handler === "agent") {
             return null;
         }
 
@@ -455,6 +437,46 @@ async function syncAgentCurrentChats(agentId: string | null | undefined): Promis
 
 export const chatLifecycleService = {
     /**
+     * Ensures an ACTIVE/WAITING widget chat exists for lead capture or messaging.
+     */
+    async ensureWidgetChat(params: {
+        widgetKey: string;
+        sessionId: string;
+        visitorInfo?: WidgetVisitorInfo;
+    }): Promise<Chat> {
+        const property = await propertyRepository.findByWidgetKey(params.widgetKey);
+        if (!property) {
+            throw new AppError(404, "Property not found");
+        }
+
+        const existing = await chatRepository.findReusableByPropertyAndSession({
+            propertyId: property.id,
+            sessionId: params.sessionId,
+        });
+        if (existing) {
+            return existing;
+        }
+
+        try {
+            return await createActiveChatForWidgetSession({
+                property: { id: property.id, companyId: property.companyId },
+                sessionId: params.sessionId,
+                visitorInfo: params.visitorInfo,
+            });
+        } catch (error: unknown) {
+            const retry = await chatRepository.findReusableByPropertyAndSession({
+                propertyId: property.id,
+                sessionId: params.sessionId,
+            });
+            if (retry) {
+                return retry;
+            }
+            const message = error instanceof Error ? error.message : "Unknown error";
+            throw new AppError(500, `Failed to create chat: ${message}`);
+        }
+    },
+
+    /**
      * Initializes a widget session without creating a chat.
      * Chat will be created lazily when the first message is sent.
      * This prevents empty chats from appearing in the dashboard.
@@ -529,13 +551,35 @@ export const chatLifecycleService = {
         deferAiReply?: boolean;
         clientMessageId?: string;
         beforeAutoReply?: (chat: Chat) => Promise<void>;
-    }): Promise<{ chatId: string; userMessage: MessageDTO; botMessage: MessageDTO | null; needsLeadInfo?: boolean; hasClosingIntent?: boolean; duplicate?: boolean }> {
+    }): Promise<{ chatId: string; userMessage: MessageDTO | null; botMessage: MessageDTO | null; needsLeadInfo?: boolean; hasClosingIntent?: boolean; duplicate?: boolean }> {
         const { chatId, widgetKey, sessionId, text, senderType, section, suppressUnreadIncrement, visitorInfo, metadata, deferAiReply, clientMessageId, beforeAutoReply } = params;
 
         const isVisitor = isVisitorSenderType(senderType);
         const validation = validateMessageLength(text, isVisitor);
         if (!validation.isValid) {
             throw new AppError(400, validation.error || "Message too long");
+        }
+
+        if (isVisitor && widgetKey && sessionId) {
+            const property = await propertyRepository.findByWidgetKey(widgetKey);
+            if (!property) {
+                throw new AppError(404, "Property not found");
+            }
+
+            const existingLead = await leadRepository.findLatestByChatSession({
+                companyId: property.companyId,
+                propertyId: property.id,
+                sessionId,
+            });
+
+            if (!existingLead) {
+                return {
+                    chatId: chatId ?? "",
+                    userMessage: null,
+                    botMessage: null,
+                    needsLeadInfo: true,
+                };
+            }
         }
 
         let chat = chatId ? await chatRepository.findById(chatId) : null;
@@ -755,7 +799,6 @@ export const chatLifecycleService = {
         }
 
         let botMessage: MessageDTO | null = null;
-        let needsLeadInfo = false;
         let hasClosingIntent = false;
         if (visitorType === "VISITOR") {
             hasClosingIntent = detectClosingIntent(text);
@@ -767,17 +810,7 @@ export const chatLifecycleService = {
 
         if (chat.agentId) {
             await chatSchedulerService.cancelScheduledBotMessage(chat.id);
-
-            if (visitorType === "VISITOR") {
-                const visitorMessageCount = await messageRepository.countByChatAndSender(chat.id, "VISITOR");
-                const existingLead = await leadRepository.findByChatId(chat.id);
-                needsLeadInfo = shouldRequestLeadInfo(!!existingLead, visitorMessageCount);
-            }
         } else if (visitorType === "VISITOR") {
-            const visitorMessageCount = await messageRepository.countByChatAndSender(chat.id, "VISITOR");
-            const existingLead = await leadRepository.findByChatId(chat.id);
-            needsLeadInfo = shouldRequestLeadInfo(!!existingLead, visitorMessageCount);
-
             if (!deferAiReply) {
                 await beforeAutoReply?.(chat);
                 botMessage = await executeVisitorBotReply(chat, userMessage, text, section);
@@ -799,7 +832,6 @@ export const chatLifecycleService = {
                 clientMessageId: userMessage.clientMessageId,
             },
             botMessage,
-            needsLeadInfo,
             hasClosingIntent,
         };
     },
@@ -840,17 +872,12 @@ export const chatLifecycleService = {
         }
 
         const text = userMessage.text || "";
-        const property = await propertyRepository.findById(chat.propertyId, chat.companyId);
-        const company = await prisma.company.findUnique({
-            where: { id: chat.companyId },
-            select: { isPro: true },
+        const routingDecision = await conversationRoutingService.decideHandler({
+            propertyId: chat.propertyId,
+            companyId: chat.companyId,
+            chatId: chat.id,
         });
-        const isPro = company?.isPro ?? false;
-        const isAiEnabled =
-            property?.aiEnabled !== false &&
-            isPro &&
-            chat.aiEnabled !== false &&
-            !chat.agentId;
+        const isAiEnabled = routingDecision.handler === "ai";
 
         let botMessage: MessageDTO | null = null;
         try {

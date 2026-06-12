@@ -9,6 +9,8 @@ type CreateAccountLeadInput = {
     companyName?: string | null;
 };
 
+type KylasEntityRef = { id: number };
+
 type KylasLeadPayload = {
     firstName: string;
     lastName?: string;
@@ -23,15 +25,16 @@ type KylasLeadPayload = {
         primary: boolean;
     }>;
     companyName?: string;
+    pipeline: KylasEntityRef;
+    pipelineStage: KylasEntityRef;
+    cfProjectTitle?: KylasEntityRef;
+    subSource?: string;
     utmSource?: string;
+    utmMedium?: string;
     utmCampaign?: string;
-    projectTitle?: string;
 };
 
 const log = getModuleLogger("kylasLeadService");
-const DEFAULT_UTM_SOURCE = "chatbot";
-const DEFAULT_UTM_CAMPAIGN = "new-account-registration";
-const DEFAULT_PROJECT_TITLE = "MitraVarta";
 const E164_PHONE_REGEX = /^\+[1-9]\d{9,14}$/;
 
 function splitFullName(fullName: string): Pick<KylasLeadPayload, "firstName" | "lastName"> {
@@ -74,6 +77,7 @@ function normalizePhoneForKylas(phoneRaw: string): string | null {
 }
 
 function buildPayload(input: CreateAccountLeadInput): KylasLeadPayload {
+    const kylas = config.kylas;
     const name = splitFullName(input.fullName);
     const companyName = input.companyName?.trim();
     const phone = normalizePhoneForKylas(input.phone);
@@ -99,9 +103,13 @@ function buildPayload(input: CreateAccountLeadInput): KylasLeadPayload {
             }
             : {}),
         ...(companyName ? { companyName } : {}),
-        utmSource: DEFAULT_UTM_SOURCE,
-        utmCampaign: DEFAULT_UTM_CAMPAIGN,
-        projectTitle: DEFAULT_PROJECT_TITLE,
+        pipeline: { id: kylas.pipelineId },
+        pipelineStage: { id: kylas.pipelineStageId },
+        ...(kylas.projectTitleId ? { cfProjectTitle: { id: kylas.projectTitleId } } : {}),
+        subSource: kylas.subSource,
+        utmSource: kylas.utmSource,
+        utmMedium: kylas.utmMedium,
+        utmCampaign: kylas.utmCampaign,
     };
 }
 
@@ -116,7 +124,7 @@ async function readResponseBody(response: Response): Promise<string> {
 export const kylasLeadService = {
     async createAccountLead(input: CreateAccountLeadInput): Promise<void> {
         if (!config.kylas.accountLeadSyncEnabled) {
-            log.debug("Kylas lead sync skipped because account lead sync is disabled", {
+            log.info("Kylas lead sync skipped (KYLAS_ACCOUNT_LEAD_SYNC_ENABLED is off)", {
                 nodeEnv: config.server.nodeEnv,
             });
             return;
@@ -126,7 +134,7 @@ export const kylasLeadService = {
         const endpoint = normalizeLeadEndpoint(baseUrl);
 
         if (!apiKey || !endpoint) {
-            log.debug("Kylas lead sync skipped because API configuration is missing");
+            log.warn("Kylas lead sync skipped (set KYLAS_API_KEY and KYLAS_API_BASE_URL)");
             return;
         }
 
@@ -162,6 +170,12 @@ export const kylasLeadService = {
 
         if (!response.ok) {
             const responseBody = await readResponseBody(response);
+            if (response.status === 400 && responseBody.includes("002020")) {
+                log.info("Kylas lead already exists for this email or phone", {
+                    email: payload.emails[0]?.value,
+                });
+                return;
+            }
             throw new Error(
                 `Kylas lead create failed with status ${response.status}: ${responseBody.slice(0, 500)}`
             );
@@ -171,7 +185,8 @@ export const kylasLeadService = {
             email: payload.emails[0]?.value,
             phone: payload.phoneNumbers?.[0]?.value,
             companyName: payload.companyName,
+            pipelineId: payload.pipeline.id,
+            pipelineStageId: payload.pipelineStage.id,
         });
     },
 };
-

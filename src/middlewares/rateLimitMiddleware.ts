@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { AppError } from "../utils/appError";
 import { extractIPAddress } from "../utils/requestMeta";
-import { consumeRateLimit } from "../helpers/rateLimit/rateLimitStore";
+import { consumeRateLimit, peekRateLimit } from "../helpers/rateLimit/rateLimitStore";
 import { config } from "../config";
 import { hashPasswordResetToken } from "../utils/hash";
 import { userRepository } from "../repositories/userRepository";
@@ -51,9 +51,35 @@ export function rateLimit(options: RateLimitOptions) {
 
 export const widgetIPRateLimit = rateLimit({
   windowMs: 60 * 1000,
-  maxRequests: 60,
+  maxRequests: 5,
   message: "Too many requests from this IP. Please try again later.",
 });
+
+export const websiteAnalyticsTrackIpRateLimit = rateLimit({
+  windowMs: config.analytics.trackRateLimit.windowMs,
+  maxRequests: config.analytics.trackRateLimit.maxPerIp,
+  message: "Too many analytics requests from this IP. Please try again later.",
+});
+
+export function websiteAnalyticsTrackVisitorRateLimit(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const visitorKey =
+    typeof req.body?.visitorKey === "string" ? req.body.visitorKey.trim() : "";
+
+  if (!visitorKey) {
+    return websiteAnalyticsTrackIpRateLimit(req, res, next);
+  }
+
+  return rateLimit({
+    windowMs: config.analytics.trackRateLimit.windowMs,
+    maxRequests: config.analytics.trackRateLimit.maxPerVisitorKey,
+    keyGenerator: () => `analytics:visitor:${visitorKey}`,
+    message: "Too many analytics requests for this visitor. Please try again later.",
+  })(req, res, next);
+}
 
 export const widgetSessionRateLimit = (req: Request, res: Response, next: NextFunction) => {
   const sessionId = req.body?.sessionId;
@@ -340,13 +366,14 @@ export async function checkRateLimit(
 ): Promise<{ allowed: boolean; retryAfter?: number }> {
   try {
     const now = Date.now();
-    const updated = await consumeRateLimit(key, windowMs);
+    const current = await peekRateLimit(key, windowMs);
 
-    if (updated.count > maxRequests) {
-      const retryAfter = Math.ceil((updated.resetTime - now) / 1000);
+    if (current.count >= maxRequests) {
+      const retryAfter = Math.max(1, Math.ceil((current.resetTime - now) / 1000));
       return { allowed: false, retryAfter };
     }
 
+    await consumeRateLimit(key, windowMs);
     return { allowed: true };
   } catch (error) {
     if (options?.failClosed) {

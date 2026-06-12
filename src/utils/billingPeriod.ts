@@ -6,6 +6,20 @@ export type AnniversaryBillingPeriod = {
   nextBillingAt: Date;
 };
 
+export type SubscriptionBillingCycle =
+  | "TRIAL"
+  | "TEST_1_MIN"
+  | "MONTHLY"
+  | "QUARTERLY"
+  | "HALF_YEARLY"
+  | "YEARLY";
+
+function isFixedDurationBillingCycle(billingCycle: SubscriptionBillingCycle): boolean {
+  return billingCycle === "TRIAL" || billingCycle === "TEST_1_MIN";
+}
+
+export { isFixedDurationBillingCycle };
+
 function getLastDayOfMonthUtc(year: number, monthIndex: number): number {
   return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 }
@@ -37,24 +51,40 @@ export function getBillingAnchorDay(subscriptionStartDate: Date): number {
 export function calculateNextBillingAt(
   currentPeriodStart: Date,
   billingAnchorDay: number,
-  subscriptionStartDate: Date
+  subscriptionStartDate: Date,
+  billingCycle: SubscriptionBillingCycle = "MONTHLY"
 ): Date {
+  if (billingCycle === "TRIAL") {
+    return new Date(currentPeriodStart.getTime() + 5 * 24 * 60 * 60 * 1000);
+  }
+
+  if (billingCycle === "TEST_1_MIN") {
+    return new Date(currentPeriodStart.getTime() + 60 * 1000);
+  }
+
+  if (billingCycle === "MONTHLY") {
+    return new Date(currentPeriodStart.getTime() + 30 * 24 * 60 * 60 * 1000);
+  }
+
+  const monthsToAdd = billingCycle === "QUARTERLY" ? 3 : billingCycle === "HALF_YEARLY" ? 6 : 12;
   return buildUtcAnchorDate(
     subscriptionStartDate,
     currentPeriodStart.getUTCFullYear(),
-    currentPeriodStart.getUTCMonth() + 1,
+    currentPeriodStart.getUTCMonth() + monthsToAdd,
     billingAnchorDay
   );
 }
 
 export function buildInitialAnniversaryBillingPeriod(
-  subscriptionStartDate: Date
+  subscriptionStartDate: Date,
+  billingCycle: SubscriptionBillingCycle = "MONTHLY"
 ): AnniversaryBillingPeriod {
   const billingAnchorDay = getBillingAnchorDay(subscriptionStartDate);
   const nextBillingAt = calculateNextBillingAt(
     subscriptionStartDate,
     billingAnchorDay,
-    subscriptionStartDate
+    subscriptionStartDate,
+    billingCycle
   );
 
   return {
@@ -68,6 +98,7 @@ export function buildInitialAnniversaryBillingPeriod(
 
 export function buildActiveAnniversaryBillingPeriod(params: {
   subscriptionStartDate: Date;
+  billingCycle?: SubscriptionBillingCycle | null;
   billingAnchorDay?: number | null;
   currentPeriodStart?: Date | null;
   nextBillingAt?: Date | null;
@@ -76,6 +107,7 @@ export function buildActiveAnniversaryBillingPeriod(params: {
   const subscriptionStartDate = params.subscriptionStartDate;
   const billingAnchorDay =
     params.billingAnchorDay ?? getBillingAnchorDay(subscriptionStartDate);
+  const billingCycle = params.billingCycle ?? "MONTHLY";
   const now = params.now ?? new Date();
 
   let currentPeriodStart =
@@ -88,15 +120,27 @@ export function buildActiveAnniversaryBillingPeriod(params: {
     calculateNextBillingAt(
       currentPeriodStart,
       billingAnchorDay,
-      subscriptionStartDate
+      subscriptionStartDate,
+      billingCycle
     );
+
+  if (isFixedDurationBillingCycle(billingCycle)) {
+    return {
+      subscriptionStartDate,
+      billingAnchorDay,
+      currentPeriodStart,
+      currentPeriodEnd: new Date(nextBillingAt.getTime() - 1),
+      nextBillingAt,
+    };
+  }
 
   while (nextBillingAt <= now) {
     currentPeriodStart = nextBillingAt;
     nextBillingAt = calculateNextBillingAt(
       currentPeriodStart,
       billingAnchorDay,
-      subscriptionStartDate
+      subscriptionStartDate,
+      billingCycle
     );
   }
 

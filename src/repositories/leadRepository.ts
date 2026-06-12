@@ -1,13 +1,28 @@
 import prisma from "../lib/prisma";
 import type { Lead, LeadSource, LeadStatus, Prisma } from "@prisma/client";
 
+export type LeadSessionSummary = {
+  id: string;
+  fullName: string;
+  chat: {
+    sessionId: string;
+    propertyId: string;
+  } | null;
+};
+
+export function readLeadUserId(lead: object): string | null {
+  const userId = (lead as { userId?: unknown }).userId;
+  return typeof userId === "string" ? userId : null;
+}
+
 export const leadRepository = {
   async create(data: {
     companyId: string;
     chatId?: string | null;
     propertyId: string;
     fullName: string;
-    email: string;
+    email?: string | null;
+    userId?: string | null;
     phone?: string | null;
     companyName?: string | null;
     notes?: string | null;
@@ -22,7 +37,8 @@ export const leadRepository = {
         chatId: data.chatId ?? null,
         propertyId: data.propertyId,
         fullName: data.fullName,
-        email: data.email,
+        email: data.email ?? null,
+        userId: data.userId ?? null,
         phone: data.phone ?? null,
         companyName: data.companyName ?? null,
         notes: data.notes ?? null,
@@ -30,7 +46,7 @@ export const leadRepository = {
         source: data.source ?? "WEBSITE",
         channel: data.channel ?? "web_widget",
         visitorId: data.visitorId ?? null,
-      },
+      } as Prisma.LeadUncheckedCreateInput,
     });
   },
 
@@ -39,13 +55,76 @@ export const leadRepository = {
       where: {
         chatId,
         ...(companyId ? { companyId } : {}),
+        property: { deletedAt: null },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  },
+
+  async findLatestByChatSession(params: {
+    companyId: string;
+    propertyId: string;
+    sessionId: string;
+  }): Promise<Lead | null> {
+    return prisma.lead.findFirst({
+      where: {
+        companyId: params.companyId,
+        propertyId: params.propertyId,
+        property: { deletedAt: null },
+        chat: {
+          companyId: params.companyId,
+          propertyId: params.propertyId,
+          sessionId: params.sessionId,
+          deletedAt: null,
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  },
+
+  async findLatestByChatSessions(params: {
+    companyId: string;
+    sessionIds: string[];
+    propertyIds?: string[];
+  }): Promise<LeadSessionSummary[]> {
+    const sessionIds = [...new Set(params.sessionIds.filter(Boolean))];
+    const propertyIds = params.propertyIds
+      ? [...new Set(params.propertyIds.filter(Boolean))]
+      : undefined;
+
+    if (sessionIds.length === 0) {
+      return [];
+    }
+
+    return prisma.lead.findMany({
+      where: {
+        companyId: params.companyId,
+        property: { deletedAt: null },
+        ...(propertyIds && propertyIds.length > 0 ? { propertyId: { in: propertyIds } } : {}),
+        chat: {
+          companyId: params.companyId,
+          sessionId: { in: sessionIds },
+          deletedAt: null,
+          ...(propertyIds && propertyIds.length > 0 ? { propertyId: { in: propertyIds } } : {}),
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        fullName: true,
+        chat: {
+          select: {
+            sessionId: true,
+            propertyId: true,
+          },
+        },
       },
     });
   },
 
   async findById(id: string, companyId: string): Promise<Lead | null> {
     return prisma.lead.findFirst({
-      where: { id, companyId },
+      where: { id, companyId, property: { deletedAt: null } },
     });
   },
 
@@ -55,7 +134,11 @@ export const leadRepository = {
 
   async findByPropertyId(propertyId: string, companyId?: string): Promise<Lead[]> {
     return prisma.lead.findMany({
-      where: { propertyId, ...(companyId ? { companyId } : {}) },
+      where: {
+        propertyId,
+        ...(companyId ? { companyId } : {}),
+        property: { deletedAt: null },
+      },
       orderBy: { createdAt: "desc" },
     });
   },
@@ -70,6 +153,7 @@ export const leadRepository = {
       where: {
         propertyId,
         ...(companyId ? { companyId } : {}),
+        property: { deletedAt: null },
         ...(startDate || endDate
           ? {
             createdAt: {
@@ -101,6 +185,7 @@ export const leadRepository = {
       where: {
         companyId,
         propertyId: { in: propertyIds },
+        property: { deletedAt: null },
         ...where,
       },
       orderBy: { createdAt: "desc" },
@@ -127,6 +212,7 @@ export const leadRepository = {
       where: {
         companyId,
         propertyId: { in: propertyIds },
+        property: { deletedAt: null },
         ...where,
       },
     });
@@ -193,7 +279,10 @@ export const leadRepository = {
     take: number
   ): Promise<Lead[]> {
     return prisma.lead.findMany({
-      where,
+      where: {
+        ...where,
+        property: { deletedAt: null },
+      },
       orderBy: { createdAt: "desc" },
       skip,
       take,
@@ -210,7 +299,12 @@ export const leadRepository = {
   },
 
   async countWithFilters(where: Prisma.LeadWhereInput): Promise<number> {
-    return prisma.lead.count({ where });
+    return prisma.lead.count({
+      where: {
+        ...where,
+        property: { deletedAt: null },
+      },
+    });
   },
 
   async findManyForExport(where: Prisma.LeadWhereInput, includeCompany: boolean = false): Promise<Array<Lead & {

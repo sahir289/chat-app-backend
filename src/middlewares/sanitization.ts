@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import xss from "xss";
+import { getModuleLogger } from "../utils/logger";
+
+const log = getModuleLogger("sanitization");
 
 // Define allowed value types
 type Sanitizable =
@@ -28,7 +31,7 @@ const sanitize = (obj: Sanitizable): Sanitizable => {
             try {
                 clone[key] = sanitize(obj[key]);
             } catch (error) {
-                console.error(`Error sanitizing key "${key}"`, error);
+                log.error(`Error sanitizing key "${key}"`, error);
                 clone[key] = obj[key];
             }
         }

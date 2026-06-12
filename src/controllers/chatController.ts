@@ -77,13 +77,13 @@ export async function postMessageHandler(
             typeof clientMessageId === "string" ? clientMessageId : undefined,
     });
 
-    // If lead info is needed, include it in response
-    if (data.needsLeadInfo) {
+    // If lead info is needed, return before broadcasting unsaved visitor messages
+    if (data.needsLeadInfo || !data.userMessage) {
         return successResponse(res, {
             statusCode: 201,
             data: {
                 ...data,
-                needsLeadInfo: true,
+                ...(data.needsLeadInfo ? { needsLeadInfo: true } : {}),
             },
         });
     }

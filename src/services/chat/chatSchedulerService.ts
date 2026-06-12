@@ -1,9 +1,9 @@
 import { SCHEDULED_BOT_DELAY_MS, SCHEDULED_BOT_ITEM_KEY_PREFIX, SCHEDULED_BOT_ITEM_TTL_SECONDS, SCHEDULED_BOT_LOCK_KEY_PREFIX, SCHEDULED_BOT_LOCK_TTL_SECONDS, SCHEDULED_BOT_WORKER_POLL_MS, SCHEDULED_BOT_ZSET_KEY } from "../../constants/chatConstant";
 import prisma from "../../lib/prisma";
 import { chatRepository } from "../../repositories/chatRepository";
-import { hasOnlineAgents } from "../../socket/index";
 import { ScheduledBotMessagePayload } from "../../types/chat";
 import { getRedisClient, isRedisAvailable } from "../../utils/redis";
+import { conversationRoutingService } from "../conversationRoutingService";
 import { chatAutoReplyService } from "./chatAutoReplyService";
 import { chatSocketService } from "./chatSocketService";
 const fallbackScheduledBotMessages = new Map<string, { timeout: NodeJS.Timeout }>();
@@ -26,7 +26,11 @@ async function processScheduledBotMessage(payload: ScheduledBotMessagePayload): 
         return;
     }
 
-    const agentsAvailable = await hasOnlineAgents(payload.propertyId);
+    const routingDecision = await conversationRoutingService.decideHandler({
+        propertyId: payload.propertyId,
+        companyId: payload.companyId,
+        chatId: payload.chatId,
+    });
 
     const hasAgentMessage = await prisma.message.findFirst({
         where: {
@@ -40,7 +44,7 @@ async function processScheduledBotMessage(payload: ScheduledBotMessagePayload): 
         } as any,
     });
 
-    if (!agentsAvailable || !hasAgentMessage) {
+    if (routingDecision.handler !== "agent" && !hasAgentMessage) {
         const botMsg = await chatAutoReplyService.sendAutoMessage(
             payload.chatId,
             payload.propertyId,

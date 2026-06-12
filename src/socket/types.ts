@@ -33,6 +33,8 @@ export interface MessagePayload {
     country?: string | null;
     ipAddress?: string | null;
     agentId?: string | null;
+    senderName?: string | null;
+    agentName?: string | null;
     metadata?: any;
     deferAiReply?: boolean;
     clientMessageId?: string;

@@ -4,7 +4,13 @@ import { requireModule } from "../middlewares/moduleAccessMiddleware";
 import { authMiddleware, tenantMiddleware } from "../middlewares/authMiddleware";
 import { companySuspensionMiddleware } from "../middlewares/companySuspensionMiddleware";
 import { validate } from "../middlewares/validationMiddleware";
-import { createPropertySchema, updatePropertySchema } from "../validations/propertyValidation";
+import {
+  createPropertySchema,
+  propertyIdParamSchema,
+  updateBusinessHoursSchema,
+  updatePropertySchema,
+  widgetKeyParamSchema,
+} from "../validations/propertyValidation";
 import {
   createPropertyHandler,
   listPropertiesHandler,
@@ -12,6 +18,8 @@ import {
   deletePropertyHandler,
   updatePropertyHandler,
   updatePropertySettingsHandler,
+  getPropertyBusinessHoursHandler,
+  updatePropertyBusinessHoursHandler,
   getPropertyCodeHandler,
   getPropertySettingsByWidgetKeyHandler,
   uploadLogoHandler,
@@ -20,6 +28,7 @@ import {
 const router = Router();
 
 router.get("/widget/:widgetKey/settings",
+  validate(widgetKeyParamSchema),
   asyncHandler(getPropertySettingsByWidgetKeyHandler));
 
 router.post("/", 
@@ -39,13 +48,22 @@ router.get("/:id",
   authMiddleware, 
   tenantMiddleware, 
   requireModule("properties"), 
+  validate(propertyIdParamSchema),
   asyncHandler(getPropertyHandler));
 
 router.get("/:id/code", 
   authMiddleware, 
   tenantMiddleware, 
   requireModule("properties"), 
+  validate(propertyIdParamSchema),
   asyncHandler(getPropertyCodeHandler));
+
+router.get("/:id/business-hours",
+  authMiddleware,
+  tenantMiddleware,
+  requireModule("properties"),
+  validate(propertyIdParamSchema),
+  asyncHandler(getPropertyBusinessHoursHandler));
 
 router.patch("/:id", 
   authMiddleware, 
@@ -58,18 +76,28 @@ router.patch("/:id/settings",
   authMiddleware, 
   tenantMiddleware, 
   requireModule("properties"), 
+  validate(propertyIdParamSchema),
   asyncHandler(updatePropertySettingsHandler));
+
+router.patch("/:id/business-hours",
+  authMiddleware,
+  tenantMiddleware,
+  requireModule("properties"),
+  validate(updateBusinessHoursSchema),
+  asyncHandler(updatePropertyBusinessHoursHandler));
 
 router.post("/:id/logo", 
   authMiddleware, 
   tenantMiddleware, 
   requireModule("properties"), 
+  validate(propertyIdParamSchema),
   companySuspensionMiddleware, ...uploadLogoHandler);
 
 router.delete("/:id", 
   authMiddleware, 
   tenantMiddleware, 
   requireModule("properties"), 
+  validate(propertyIdParamSchema),
   asyncHandler(deletePropertyHandler));
 
 export default router;

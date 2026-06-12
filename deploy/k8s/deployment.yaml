@@ -8,12 +8,12 @@ metadata:
   namespace: chatbot
   labels:
     app: chatbot-backend
+
 spec:
   # Start with 3 replicas across AZs for high availability. The HPA will scale
   # this up/down automatically based on load (see hpa.yaml).
   replicas: 3
 
-  # How the Deployment finds the pods it owns (must match template labels below).
   selector:
     matchLabels:
       app: chatbot-backend
@@ -22,60 +22,114 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1          # up to 1 extra pod above replicas during rollout
-      maxUnavailable: 0    # never drop below desired count → no downtime
+      maxSurge: 1
+      maxUnavailable: 0
 
   template:
     metadata:
       labels:
-        app: chatbot-backend   # pods get this label; Service/HPA select on it
+        app: chatbot-backend
+
     spec:
-      # Give Node time to flush connections on SIGTERM (matches graceful shutdown).
+      # Future-proofing for AWS IAM Roles for Service Accounts (IRSA).
+      # This lets pods access AWS resources without AWS_ACCESS_KEY_ID secrets.
+      serviceAccountName: chatbot-backend
+
+      # Give Node time to flush WebSocket connections on shutdown.
       terminationGracePeriodSeconds: 30
+
+      ####################################################################
+      # Spread replicas across nodes and AZs.
+      #
+      # Without this Kubernetes may place all pods on a single node.
+      ####################################################################
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: chatbot-backend
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: chatbot-backend
+                topologyKey: kubernetes.io/hostname
+
       containers:
         - name: chatbot-backend
-          # CI (Jenkins) overwrites this tag per commit via "kubectl set image".
-          image: 123456789012.dkr.ecr.ap-south-1.amazonaws.com/chatbot-backend:latest
+
+          ##################################################################
+          # Jenkins overwrites this image during deployment:
+          #
+          # kubectl set image deployment/chatbot-backend ...
+          #
+          # Never rely on latest in production.
+          ##################################################################
+          image: REPLACE_BY_JENKINS/chatbot-backend:v1
+
+          imagePullPolicy: IfNotPresent
+
           ports:
             - containerPort: 4000
 
-          # Inject ALL ConfigMap keys and ALL Secret keys as environment variables
-          # — exactly how your code reads process.env.* today. No code changes.
+          ##################################################################
+          # ConfigMap = non-secret config
+          # Secret = sensitive values (injected via External Secrets)
+          ##################################################################
           envFrom:
             - configMapRef:
                 name: chatbot-config
             - secretRef:
                 name: chatbot-secrets
 
-          # PROBES — how Kubernetes knows the app's true state, using your /health.
-          #
-          # startupProbe: protects slow boots (Prisma migrate + Redis/DB checks).
-          # While it's still failing, liveness/readiness are paused.
+          ##################################################################
+          # startupProbe:
+          # Allows slow startup (DB connection, Redis connection, Prisma init).
+          ##################################################################
           startupProbe:
             httpGet:
               path: /health
               port: 4000
             failureThreshold: 30
-            periodSeconds: 5      # allows up to ~150s to become ready
-          # livenessProbe: if this fails repeatedly, the pod is restarted (deadlock).
+            periodSeconds: 5
+
+          ##################################################################
+          # livenessProbe:
+          # Restart deadlocked containers automatically.
+          ##################################################################
           livenessProbe:
             httpGet:
               path: /health
               port: 4000
+            initialDelaySeconds: 20
             periodSeconds: 15
+            timeoutSeconds: 5
             failureThreshold: 3
-          # readinessProbe: if this fails, the pod is removed from the Service's
-          # load-balancing pool but NOT killed — so no traffic hits a pod that
-          # temporarily lost Redis/DB. This is what prevents broken responses.
+
+          ##################################################################
+          # readinessProbe:
+          # Remove unhealthy pods from ALB traffic immediately.
+          ##################################################################
           readinessProbe:
             httpGet:
               path: /health
               port: 4000
+            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
 
-          # Resource requests/limits: requests drive scheduling + HPA math; limits
-          # cap a noisy pod so it can't starve neighbors. Tune to real usage.
+          ##################################################################
+          # Resource requests/limits.
+          #
+          # Tune after observing real production traffic.
+          ##################################################################
           resources:
             requests:
               cpu: "250m"
@@ -84,17 +138,26 @@ spec:
               cpu: "1000m"
               memory: "768Mi"
 
-          # Defense in depth: no new privileges, non-root, read-only root FS.
+          ##################################################################
+          # Defense in depth.
+          ##################################################################
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             readOnlyRootFilesystem: true
             capabilities:
-              drop: ["ALL"]
-          # App writes logs/temp; mount a writable scratch dir since root FS is RO.
+              drop:
+                - ALL
+
+          ##################################################################
+          # Writable temp directory because root filesystem is read-only.
+          ##################################################################
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+
       volumes:
         - name: tmp
           emptyDir: {}

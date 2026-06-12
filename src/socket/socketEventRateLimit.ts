@@ -18,13 +18,33 @@ export async function consumeSocketTypingBudget(socketId: string): Promise<boole
     return allowed;
 }
 
-export async function consumeSocketChatMessageBudget(socketId: string): Promise<boolean> {
-    const { allowed } = await checkRateLimit(
-        `socket:event:chat_message:${socketId}`,
+type SocketMessageRateLimitScope = {
+    sessionId?: string | null;
+    chatId?: string | null;
+};
+
+function getSocketChatMessageRateLimitKey(
+    socketId: string,
+    scope?: SocketMessageRateLimitScope
+): string {
+    if (scope?.chatId) {
+        return `socket:event:chat_message:chat:${scope.chatId}`;
+    }
+    if (scope?.sessionId) {
+        return `socket:event:chat_message:session:${scope.sessionId}`;
+    }
+    return `socket:event:chat_message:socket:${socketId}`;
+}
+
+export async function consumeSocketChatMessageBudget(
+    socketId: string,
+    scope?: SocketMessageRateLimitScope
+): Promise<{ allowed: boolean; retryAfter?: number }> {
+    return checkRateLimit(
+        getSocketChatMessageRateLimitKey(socketId, scope),
         MESSAGE_WINDOW_MS,
         MESSAGE_MAX_PER_WINDOW
     );
-    return allowed;
 }
 
 export async function consumeSocketMessageEditBudget(socketId: string): Promise<boolean> {

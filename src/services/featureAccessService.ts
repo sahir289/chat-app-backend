@@ -1,5 +1,10 @@
 import prisma from "../lib/prisma";
-import { Role } from "@prisma/client";
+import { PlanTier, Role, SubscriptionStatus } from "@prisma/client";
+import {
+  resolveSubscriptionAccess,
+  subscriptionAccessSelect,
+  subscriptionService,
+} from "./subscriptionService";
 
 export type FeatureName =
   | "advanced_analytics"
@@ -40,6 +45,11 @@ export const featureAccessService = {
           select: {
             id: true,
             isPro: true,
+            subscriptions: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: subscriptionAccessSelect,
+            },
           },
         },
       },
@@ -61,12 +71,22 @@ export const featureAccessService = {
       return { allowed: false, reason: "No company found" };
     }
 
-    // Check if feature requires PRO access
+    const downgraded = await subscriptionService.ensureCompanyPlanMatchesSubscription(user.company.id);
+    if (downgraded) {
+      user.company.isPro = false;
+    }
+
+    const subscriptionAccess = resolveSubscriptionAccess({
+      isPro: user.company.isPro,
+      subscription: user.company.subscriptions[0] ?? null,
+    });
+
+    // Check if feature requires active PRO access
     if (PRO_FEATURES.includes(feature)) {
-      if (!user.company.isPro) {
+      if (!subscriptionAccess.canAccessPaidFeatures) {
         return {
           allowed: false,
-          reason: "Feature requires PRO access. Please upgrade to Pro.",
+          reason: subscriptionAccess.reason,
         };
       }
     }
@@ -82,6 +102,11 @@ export const featureAccessService = {
           select: {
             id: true,
             isPro: true,
+            subscriptions: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: subscriptionAccessSelect,
+            },
           },
         },
       },
@@ -103,12 +128,20 @@ export const featureAccessService = {
       return this.getAllFeaturesDenied();
     }
 
-    const isPro = user.company.isPro;
+    const downgraded = await subscriptionService.ensureCompanyPlanMatchesSubscription(user.company.id);
+    if (downgraded) {
+      user.company.isPro = false;
+    }
+
+    const subscriptionAccess = resolveSubscriptionAccess({
+      isPro: user.company.isPro,
+      subscription: user.company.subscriptions[0] ?? null,
+    });
     const access: Record<FeatureName, boolean> = {} as Record<FeatureName, boolean>;
     const features = PRO_FEATURES;
 
     for (const feature of features) {
-      access[feature] = isPro; // All PRO features require isPro = true
+      access[feature] = subscriptionAccess.canAccessPaidFeatures;
     }
 
     return access;
@@ -128,6 +161,11 @@ export const featureAccessService = {
           select: {
             id: true,
             isPro: true,
+            subscriptions: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: subscriptionAccessSelect,
+            },
           },
         },
       },
@@ -145,8 +183,8 @@ export const featureAccessService = {
 
     if (user.isSuperAdmin || user.role === Role.SUPER_ADMIN) {
       return {
-        status: "ACTIVE",
-        planTier: "PRO",
+        status: SubscriptionStatus.ACTIVE,
+        planTier: PlanTier.PRO,
         isActive: true,
         canAccessPaidFeatures: true,
         isPro: true,
@@ -163,14 +201,22 @@ export const featureAccessService = {
       };
     }
 
-    const isPro = user.company.isPro;
+    const downgraded = await subscriptionService.ensureCompanyPlanMatchesSubscription(user.company.id);
+    if (downgraded) {
+      user.company.isPro = false;
+    }
+
+    const subscriptionAccess = resolveSubscriptionAccess({
+      isPro: user.company.isPro,
+      subscription: user.company.subscriptions[0] ?? null,
+    });
 
     return {
-      status: "ACTIVE", // Always active in simplified model
-      planTier: isPro ? "PRO" : "FREE",
-      isActive: true,
-      canAccessPaidFeatures: isPro,
-      isPro,
+      status: subscriptionAccess.status,
+      planTier: subscriptionAccess.planTier,
+      isActive: subscriptionAccess.isActive,
+      canAccessPaidFeatures: subscriptionAccess.canAccessPaidFeatures,
+      isPro: subscriptionAccess.isPro,
     };
   },
 

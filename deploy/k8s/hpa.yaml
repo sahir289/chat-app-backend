@@ -4,16 +4,20 @@
 # Requires the Kubernetes Metrics Server to be installed in the cluster.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
+
 metadata:
   name: chatbot-backend
   namespace: chatbot
+
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
     name: chatbot-backend
-  minReplicas: 3      # never below 3 → survives an AZ outage
+
+  minReplicas: 2      # never below 2 → survives an AZ outage
   maxReplicas: 20
+
   metrics:
     # Scale to keep average CPU around 65% of each pod's REQUESTED cpu.
     - type: Resource
@@ -28,10 +32,12 @@ spec:
         target:
           type: Utilization
           averageUtilization: 75
+
   behavior:
     # Scale up fast (handle spikes), scale down slowly (avoid thrashing long-lived
     # WebSocket connections by killing pods too eagerly).
     scaleUp:
       stabilizationWindowSeconds: 30
+      
     scaleDown:
       stabilizationWindowSeconds: 300

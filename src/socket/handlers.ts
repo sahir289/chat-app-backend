@@ -50,7 +50,7 @@ import {
     consumeSocketTypingBudget,
 } from "./socketEventRateLimit";
 import { writeSecurityAuditLog } from "../services/securityAuditService";
-import { AuditAction, ResourceType } from "@prisma/client";
+import { AuditAction, ResourceType, SenderType } from "@prisma/client";
 
 type TranscriptMessageRow = Awaited<
     ReturnType<typeof chatRepository.listMessagesForTranscript>
@@ -64,6 +64,19 @@ function isAgentLikeRole(role: string | undefined): boolean {
 
 function createAuthError(message = "Unauthorized") {
     return createError(message, "UNAUTHORIZED");
+}
+
+function displayUserName(user?: { name?: string | null; email?: string | null } | null): string | null {
+    return user?.name?.trim() || user?.email?.trim() || null;
+}
+
+async function getAgentDisplayName(agentId?: string | null): Promise<string | null> {
+    if (!agentId) return null;
+    const user = await prisma.user.findUnique({
+        where: { id: agentId },
+        select: { name: true, email: true },
+    });
+    return displayUserName(user);
 }
 
 async function assertSocketCanAccessChat(
@@ -157,14 +170,14 @@ async function mapTranscriptMessageForWidgetSocket(
     );
 
     const role =
-        msg.senderType === "VISITOR"
+        msg.senderType === SenderType.VISITOR
             ? "visitor"
-            : msg.senderType === "AGENT"
+            : msg.senderType === SenderType.AGENT
               ? "agent"
               : "bot";
 
     const quickReplies =
-        msg.messageQuickReplies?.length && msg.senderType === "BOT"
+        msg.messageQuickReplies?.length && msg.senderType === SenderType.BOT
             ? msg.messageQuickReplies.map((qr) => ({
                   id: qr.id,
                   label: qr.label,
@@ -176,6 +189,7 @@ async function mapTranscriptMessageForWidgetSocket(
         id: msg.id,
         role,
         message: msg.text ?? "",
+        senderName: displayUserName((msg as any).agent),
         createdAt: msg.createdAt.toISOString(),
         editedAt: msg.editedAt?.toISOString(),
         clientMessageId: msg.clientMessageId ?? undefined,
@@ -222,6 +236,7 @@ async function buildVisitorJoinPayload(
         chatId: chat.id,
         status: chat.status,
         agentId: chat.agentId ?? null,
+        agentName: await getAgentDisplayName(chat.agentId),
         available,
         verified: true,
         messages,
@@ -542,6 +557,7 @@ export async function handleMessage(
           ok: false;
           error: string;
           code?: string;
+          retryAfter?: number;
       }
 > {
     try {
@@ -573,14 +589,39 @@ export async function handleMessage(
             return { ok: false, error: error.message, code: error.code };
         }
 
-        const messageBudgetOk = await consumeSocketChatMessageBudget(socket.id);
-        if (!messageBudgetOk) {
-            const error = createError("Too many messages. Please slow down.", "RATE_LIMITED");
-            emitError(socket, error);
-            return { ok: false, error: error.message, code: error.code };
+        const chatId = providedChatId || roomInfo?.chatId;
+        const trimmedClientMessageId =
+            typeof clientMessageId === "string" && clientMessageId.trim()
+                ? clientMessageId.trim()
+                : null;
+        let skipMessageRateLimit = false;
+
+        if (roomInfo.role === "visitor" && trimmedClientMessageId && chatId) {
+            const existingVisitorMessage = await messageRepository.findByClientMessageId({
+                chatId,
+                senderType: SenderType.VISITOR,
+                clientMessageId: trimmedClientMessageId,
+            });
+            skipMessageRateLimit = Boolean(existingVisitorMessage);
         }
 
-        const chatId = providedChatId || roomInfo?.chatId;
+        if (!skipMessageRateLimit) {
+            const messageBudget = await consumeSocketChatMessageBudget(socket.id, {
+                sessionId: roomInfo.sessionId,
+                chatId,
+            });
+            if (!messageBudget.allowed) {
+                const error = createError("Too many messages. Please slow down.", "RATE_LIMITED");
+                emitError(socket, error);
+                return {
+                    ok: false,
+                    error: error.message,
+                    code: error.code,
+                    retryAfter: messageBudget.retryAfter,
+                };
+            }
+        }
+
         if (!chatId && !roomInfo?.propertyId) {
             const error = createError("chatId or propertyId required", "MISSING_CHAT_ID");
             emitError(socket, error);
@@ -601,9 +642,9 @@ export async function handleMessage(
 
         const inferredSenderType =
             roomInfo.role === "visitor"
-                ? "VISITOR"
+                ? SenderType.VISITOR
                 : isAgentLikeRole(roomInfo.role)
-                  ? "AGENT"
+                  ? SenderType.AGENT
                   : options?.defaultSenderType || senderType;
 
         let messageVisitorInfo:
@@ -617,7 +658,7 @@ export async function handleMessage(
                   ipAddress?: string;
               }
             | undefined;
-        if (inferredSenderType === "VISITOR") {
+        if (inferredSenderType === SenderType.VISITOR) {
             const finalIpAddress =
                 normalizeIpAddress(undefined, socket.handshake.address, socket.handshake.headers) ??
                 undefined;
@@ -684,6 +725,10 @@ export async function handleMessage(
                 });
                 initialAddMessageResult = result;
 
+                if (result.needsLeadInfo) {
+                    return { ok: true, data: result };
+                }
+
                 chat = await chatRepository.findById(result.chatId);
                 if (chat) {
                     roomInfo.chatId = result.chatId;
@@ -708,7 +753,7 @@ export async function handleMessage(
 
         await assertSocketCanAccessChat(socket, chat, roomInfo, "message");
 
-        if (chat.agentId && inferredSenderType !== "AGENT" && inferredSenderType !== "VISITOR") {
+        if (chat.agentId && inferredSenderType !== SenderType.AGENT && inferredSenderType !== SenderType.VISITOR) {
             const error = createError(
                 "Only agent or visitor can send messages when chat is assigned to an agent",
                 "UNAUTHORIZED"
@@ -718,7 +763,7 @@ export async function handleMessage(
         }
 
         // Check if visitor is online before allowing agent/bot messages
-        if (inferredSenderType === "AGENT" || inferredSenderType === "BOT") {
+        if (inferredSenderType === SenderType.AGENT || inferredSenderType === SenderType.BOT) {
             const visitorOnline = await isVisitorOnline(chat.id);
             if (!visitorOnline) {
                 const error = createError(
@@ -732,7 +777,7 @@ export async function handleMessage(
 
         let sessionIdForAdd: string | undefined;
         let widgetKeyForAdd: string | undefined;
-        if (inferredSenderType === "VISITOR" && roomInfo?.sessionId) {
+        if (inferredSenderType === SenderType.VISITOR && roomInfo?.sessionId) {
             sessionIdForAdd = roomInfo.sessionId;
             const propForWidget = await propertyRepository.findById(chat.propertyId, chat.companyId);
             widgetKeyForAdd = propForWidget?.widgetKey ?? undefined;
@@ -746,7 +791,7 @@ export async function handleMessage(
                 senderType: inferredSenderType,
                 section,
                 suppressUnreadIncrement:
-                    inferredSenderType === "VISITOR"
+                    inferredSenderType === SenderType.VISITOR
                         ? await isChatActivelyViewedByAgent(chat.id, io)
                         : false,
                 sessionId: sessionIdForAdd,
@@ -770,19 +815,35 @@ export async function handleMessage(
                     roomInfo.sessionId ?? "",
                     roomInfo.companyId
                 );
-                if (inferredSenderType === "VISITOR") {
+                if (inferredSenderType === SenderType.VISITOR) {
                     await addOnlineVisitor(chat.id, socket.id);
                 }
             }
         }
 
+        if (addResult.needsLeadInfo) {
+            return { ok: true, data: addResult };
+        }
+
         const { userMessage, botMessage } = addResult;
+        if (!userMessage) {
+            return { ok: true, data: addResult };
+        }
+
+        const senderName =
+            inferredSenderType === SenderType.AGENT
+                ? displayUserName(socket.data.authUser)
+                : null;
+        const userMessagePayload =
+            senderName && userMessage.senderType === SenderType.AGENT
+                ? { ...userMessage, senderName }
+                : userMessage;
 
         if (!addResult.duplicate) {
             // Keep visitor messages isolated to chat room only.
             // For agent messages, allow property-room metadata updates (chat:updated) without leaking content.
-            broadcastMessage(io, userMessage, chat, {
-                includePropertyRoom: inferredSenderType === "AGENT",
+            broadcastMessage(io, userMessagePayload, chat, {
+                includePropertyRoom: inferredSenderType === SenderType.AGENT,
                 includeLegacyEvents: true,
             });
         }
@@ -798,7 +859,7 @@ export async function handleMessage(
         // CRITICAL: This event only goes to agents/dashboard in propertyRoom
         // Visitors are NOT in propertyRoom, so they won't receive this
         // This is metadata only (chatId), not message content
-        if (inferredSenderType === "VISITOR" && io && !addResult.duplicate) {
+        if (inferredSenderType === SenderType.VISITOR && io && !addResult.duplicate) {
             io.to(getPropertyRoom(chat.propertyId)).emit(SOCKET_EVENTS.CHAT_UPDATED, { chatId: chat.id });
             await emitUnreadUpdate(io, chat.id, chat.companyId, {
                 id: userMessage.id,
@@ -861,8 +922,8 @@ export async function handleTyping(
         }
 
         if (io) {
-            const senderType: "AGENT" | "VISITOR" =
-                roomInfo.role === "agent" || roomInfo.role === "dashboard" ? "AGENT" : "VISITOR";
+            const senderType =
+                roomInfo.role === "agent" || roomInfo.role === "dashboard" ? SenderType.AGENT : SenderType.VISITOR;
 
             const typingPayload = {
                 chatId: targetChatId,
@@ -1034,10 +1095,12 @@ export async function handleAgentAssign(
         });
 
         const propertyRoom = chat ? getPropertyRoom(chat.propertyId) : null;
+        const agentName = await getAgentDisplayName(agentId);
+        const assignmentPayload = { chatId, agentId, agentName };
 
         if (io) {
-            io.to(getChatRoom(chatId)).emit(SOCKET_EVENTS.CHAT_ASSIGNED, { chatId, agentId });
-            io.to(getChatRoom(chatId)).emit(SOCKET_EVENTS.CHAT_ASSIGNED_LEGACY, { chatId, agentId });
+            io.to(getChatRoom(chatId)).emit(SOCKET_EVENTS.CHAT_ASSIGNED, assignmentPayload);
+            io.to(getChatRoom(chatId)).emit(SOCKET_EVENTS.CHAT_ASSIGNED_LEGACY, assignmentPayload);
 
             if (propertyRoom) {
                 io.to(propertyRoom).emit(SOCKET_EVENTS.CHAT_UPDATED, { chatId });
@@ -1083,7 +1146,7 @@ function validateMessageEditSocket(
     // Check ownership
     if (isVisitor) {
         // Visitor can only edit their own messages
-        if (message.senderType !== "VISITOR") {
+        if (message.senderType !== SenderType.VISITOR) {
             return {
                 valid: false,
                 error: "Visitors can only edit their own messages",
@@ -1097,7 +1160,7 @@ function validateMessageEditSocket(
         }
     } else {
         // Agent can only edit their own messages
-        if (message.senderType !== "AGENT") {
+        if (message.senderType !== SenderType.AGENT) {
             return {
                 valid: false,
                 error: "Agents can only edit their own messages",

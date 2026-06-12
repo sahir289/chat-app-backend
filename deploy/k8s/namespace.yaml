@@ -3,5 +3,6 @@
 # quotas/RBAC per team or per app. Create it first; everything else lives in it.
 apiVersion: v1
 kind: Namespace
+
 metadata:
   name: chatbot
