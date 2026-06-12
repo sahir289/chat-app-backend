@@ -4,7 +4,7 @@ pipeline {
 
   environment {
     AWS_REGION    = 'ap-south-1'
-    ECR_REGISTRY  = '159018386413.dkr.ecr.ap-south-1.amazonaws.com'
+    ECR_REGISTRY  = '590183864134.dkr.ecr.ap-south-1.amazonaws.com'
     ECR_REPO      = 'chatbot-backend'
 
     EKS_CLUSTER   = 'chatbot-prod'

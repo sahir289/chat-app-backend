@@ -71,7 +71,7 @@ spec:
           #
           # Never rely on latest in production.
           ##################################################################
-          image: REPLACE_BY_JENKINS/chatbot-backend:v1
+          image: 590183864134.dkr.ecr.ap-south-1.amazonaws.com/chatbot-backend:v1
 
           imagePullPolicy: IfNotPresent
 
